@@ -28,3 +28,5 @@ apr06_0313	26	f7b0635	50/50	0.1992 ms	discard	C-contiguous: same as Fortran with
 apr06_0313	27	f637b7e	50/50	0.2076 ms	discard	suppress warnings: no significant improvement, within variance
 apr06_0313	28	9d5aaf3	50/50	1.8664 ms	discard	row/col elimination: 9.7x worse! fancy indexing overhead >> dimension reduction for random 70% sparsity
 apr06_0313	29	48d2d3e	50/50	356.1043 ms	discard	float16: no BLAS support in numpy. falls back to Python-level loops. 1850x slower than float32
+apr06_0313	30	1474e1b	50/50	0.2205 ms	discard	1000x1000 warmup: no improvement over 500x500 warmup. within variance
+apr06_0313	31	65258aa	50/50	1.5919 ms	discard	scipy sgemm wrapper: 7.4x slower. Python-level overhead far exceeds numpy @ dispatch

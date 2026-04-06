@@ -2,18 +2,13 @@ import csv
 import time
 import warnings
 import numpy as np
-from scipy.linalg.blas import sgemm
 
 warnings.filterwarnings('ignore')
 np.seterr(all='ignore')
 
-# Cache reference to avoid attribute lookup
-_sgemm = sgemm
-
 
 def multiply_matrices(a, b):
-    # Both a,b are Fortran-contiguous float32 — sgemm works directly, no copy
-    return _sgemm(1.0, a, b)
+    return a @ b
 
 
 def load_test_cases(path="test_cases.txt"):
@@ -60,9 +55,8 @@ def main():
 
     test_cases = load_test_cases()
     # Warmup BLAS with a medium-sized matmul to initialize Accelerate threadpool
-    # Large warmup to fully initialize Accelerate threadpool and AMX
-    _w = np.ones((1000, 1000), dtype=np.float32) @ np.ones((1000, 1000), dtype=np.float32)
-    del _w
+    # Warmup to initialize Accelerate threadpool and AMX
+    _w = np.ones((500, 500), dtype=np.float32) @ np.ones((500, 500), dtype=np.float32)
 
     for tc in test_cases:
         name = tc["name"]
