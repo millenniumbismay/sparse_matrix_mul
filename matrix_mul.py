@@ -1,11 +1,47 @@
 import csv
 import time
+import ctypes
 import numpy as np
+
+# Load Accelerate framework and get cblas_sgemm
+_acc = ctypes.CDLL('/System/Library/Frameworks/Accelerate.framework/Accelerate')
+_sgemm = _acc.cblas_sgemm
+_sgemm.restype = None
+_sgemm.argtypes = [
+    ctypes.c_int,   # Order (CblasRowMajor=101, CblasColMajor=102)
+    ctypes.c_int,   # TransA
+    ctypes.c_int,   # TransB
+    ctypes.c_int,   # M
+    ctypes.c_int,   # N
+    ctypes.c_int,   # K
+    ctypes.c_float,  # alpha
+    ctypes.c_void_p, # A
+    ctypes.c_int,   # lda
+    ctypes.c_void_p, # B
+    ctypes.c_int,   # ldb
+    ctypes.c_float,  # beta
+    ctypes.c_void_p, # C
+    ctypes.c_int,   # ldc
+]
+
+CblasRowMajor = 101
+CblasNoTrans = 111
 
 
 def multiply_matrices(a, b):
-    # np.dot may have simpler dispatch than @ operator
-    return np.dot(a, b)
+    m, k = a.shape
+    _, n = b.shape
+    c = np.empty((m, n), dtype=np.float32)
+    _sgemm(
+        CblasRowMajor, CblasNoTrans, CblasNoTrans,
+        m, n, k,
+        1.0,
+        a.ctypes.data, k,
+        b.ctypes.data, n,
+        0.0,
+        c.ctypes.data, n,
+    )
+    return c
 
 
 def load_test_cases(path="test_cases.txt"):
@@ -19,12 +55,12 @@ def load_test_cases(path="test_cases.txt"):
 
             m = vals[idx]; idx += 1
             n = vals[idx]; idx += 1
-            a = np.asfortranarray(np.array(vals[idx : idx + m * n], dtype=np.float32).reshape(m, n))
+            a = np.ascontiguousarray(np.array(vals[idx : idx + m * n], dtype=np.float32).reshape(m, n))
             idx += m * n
 
             n2 = vals[idx]; idx += 1
             y = vals[idx]; idx += 1
-            b = np.asfortranarray(np.array(vals[idx : idx + n2 * y], dtype=np.float32).reshape(n2, y))
+            b = np.ascontiguousarray(np.array(vals[idx : idx + n2 * y], dtype=np.float32).reshape(n2, y))
             idx += n2 * y
 
             rm = vals[idx]; idx += 1
