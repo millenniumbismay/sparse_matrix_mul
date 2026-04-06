@@ -1,1 +1,1 @@
-This repo aims to optimize the time complexity for Matrix multiplication using AutoResearch.
+This repo aims to optimize the time complexity for Sparse Matrix multiplication using AutoResearch.
