@@ -1,11 +1,11 @@
 #include <string.h>
+#include <dispatch/dispatch.h>
 #include <Accelerate/Accelerate.h>
 
 /*
- * Sparse A (CSR) × Dense B → Dense C
- * For each row i of A, finds non-zero entries and uses Accelerate's
- * cblas_saxpy to accumulate: C[i,:] += a_val * B[k,:]
- * This exploits sparsity in A while using BLAS for the vectorized inner loop.
+ * Sparse CSR(A) × Dense(B) → Dense(C) with GCD parallelism
+ * Uses vDSP_vsma (scalar multiply-add) for vectorized inner loop
+ * Parallel across rows of A via GCD dispatch_apply
  */
 void sparse_matmul(
     const int *indptr,
@@ -13,19 +13,21 @@ void sparse_matmul(
     const float *data,
     const float *b,
     float *result,
-    int m,       /* rows of A / rows of result */
-    int n,       /* cols of A / rows of B */
-    int k        /* cols of B / cols of result */
+    int m,
+    int n,
+    int k
 ) {
     memset(result, 0, (size_t)m * k * sizeof(float));
 
-    for (int i = 0; i < m; i++) {
-        float *row_result = result + (size_t)i * k;
-        for (int idx = indptr[i]; idx < indptr[i + 1]; idx++) {
-            int col = indices[idx];
-            float val = data[idx];
-            /* C[i,:] += val * B[col,:] — vectorized via BLAS saxpy */
-            cblas_saxpy(k, val, b + (size_t)col * k, 1, row_result, 1);
+    dispatch_apply(m, dispatch_get_global_queue(QOS_CLASS_USER_INTERACTIVE, 0),
+        ^(size_t i) {
+            float *row_result = result + i * k;
+            for (int idx = indptr[i]; idx < indptr[i + 1]; idx++) {
+                int col = indices[idx];
+                float val = data[idx];
+                /* row_result += val * B[col,:] using vDSP */
+                vDSP_vsma(b + (size_t)col * k, 1, &val, row_result, 1, row_result, 1, k);
+            }
         }
-    }
+    );
 }
