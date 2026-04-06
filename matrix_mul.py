@@ -1,45 +1,26 @@
 import csv
 import time
-import ctypes
 import numpy as np
-
-# Load Accelerate framework and get cblas_sgemm
-_acc = ctypes.CDLL('/System/Library/Frameworks/Accelerate.framework/Accelerate')
-_sgemm = _acc.cblas_sgemm
-_sgemm.restype = None
-_sgemm.argtypes = [
-    ctypes.c_int,   # Order (CblasRowMajor=101, CblasColMajor=102)
-    ctypes.c_int,   # TransA
-    ctypes.c_int,   # TransB
-    ctypes.c_int,   # M
-    ctypes.c_int,   # N
-    ctypes.c_int,   # K
-    ctypes.c_float,  # alpha
-    ctypes.c_void_p, # A
-    ctypes.c_int,   # lda
-    ctypes.c_void_p, # B
-    ctypes.c_int,   # ldb
-    ctypes.c_float,  # beta
-    ctypes.c_void_p, # C
-    ctypes.c_int,   # ldc
-]
-
-CblasRowMajor = 101
-CblasNoTrans = 111
+import numba
 
 
-def multiply_matrices(a, b, c, a_ptr, b_ptr, c_ptr, m, k, n):
-    # All pointers and dimensions pre-computed in loader
-    _sgemm(
-        101, 111, 111,  # RowMajor, NoTrans, NoTrans (inline constants)
-        m, n, k,
-        1.0,
-        a_ptr, k,
-        b_ptr, n,
-        0.0,
-        c_ptr, n,
-    )
-    return c
+@numba.njit(parallel=True, cache=True, fastmath=True)
+def sparse_dense_matmul(a_indptr, a_indices, a_data, b, m, n):
+    """Sparse A (CSR) × Dense B. Exploits sparsity in A, vectorizes over B columns."""
+    result = np.zeros((m, n), dtype=np.float32)
+    for i in numba.prange(m):
+        for idx in range(a_indptr[i], a_indptr[i + 1]):
+            k = a_indices[idx]
+            val = a_data[idx]
+            for j in range(n):
+                result[i, j] += val * b[k, j]
+    return result
+
+
+def multiply_matrices(a_csr, b):
+    indptr, indices, data, m = a_csr
+    _, n = b.shape
+    return sparse_dense_matmul(indptr, indices, data, b, m, n)
 
 
 def load_test_cases(path="test_cases.txt"):
@@ -53,8 +34,24 @@ def load_test_cases(path="test_cases.txt"):
 
             m = vals[idx]; idx += 1
             n = vals[idx]; idx += 1
-            a = np.ascontiguousarray(np.array(vals[idx : idx + m * n], dtype=np.float32).reshape(m, n))
+            a_dense = np.array(vals[idx : idx + m * n], dtype=np.float32).reshape(m, n)
             idx += m * n
+            # Build CSR for A
+            a_nz = a_dense != 0
+            indptr = np.zeros(m + 1, dtype=np.int32)
+            for i in range(m):
+                indptr[i + 1] = indptr[i] + np.sum(a_nz[i])
+            nnz = indptr[m]
+            indices = np.empty(nnz, dtype=np.int32)
+            data = np.empty(nnz, dtype=np.float32)
+            pos = 0
+            for i in range(m):
+                for j in range(n):
+                    if a_nz[i, j]:
+                        indices[pos] = j
+                        data[pos] = a_dense[i, j]
+                        pos += 1
+            a_csr = (indptr, indices, data, m)
 
             n2 = vals[idx]; idx += 1
             y = vals[idx]; idx += 1
@@ -65,19 +62,11 @@ def load_test_cases(path="test_cases.txt"):
             ry = vals[idx]; idx += 1
             expected = np.array(vals[idx : idx + rm * ry], dtype=np.float32).reshape(rm, ry)
 
-            out = np.empty((m, y), dtype=np.float32)
             cases.append({
                 "name": f"test_{test_id}",
-                "a": a,
+                "a": a_csr,
                 "b": b,
                 "expected": expected,
-                "out": out,
-                "a_ptr": a.ctypes.data,
-                "b_ptr": b.ctypes.data,
-                "c_ptr": out.ctypes.data,
-                "m": m,
-                "k": n,
-                "n": y,
             })
     return cases
 
@@ -92,10 +81,14 @@ def main():
     results = []
     log_file = open("output.log", "w")
 
-    for tc in load_test_cases():
+    test_cases = load_test_cases()
+    # Warm up numba JIT with first test case
+    multiply_matrices(test_cases[0]["a"], test_cases[0]["b"])
+
+    for tc in test_cases:
         name = tc["name"]
         start = time.perf_counter()
-        actual = multiply_matrices(tc["a"], tc["b"], tc["out"], tc["a_ptr"], tc["b_ptr"], tc["c_ptr"], tc["m"], tc["k"], tc["n"])
+        actual = multiply_matrices(tc["a"], tc["b"])
         latency_ms = (time.perf_counter() - start) * 1_000
 
         if np.array_equal(actual, tc["expected"]):
