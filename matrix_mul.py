@@ -6,8 +6,10 @@ import numpy as np
 
 def multiply_matrices(a, b):
     # a and b are pre-built dense float64 numpy arrays
-    # Uses BLAS dgemm for float64, then convert back to int64
-    return (a @ b).astype(np.int64)
+    # Uses BLAS dgemm for float64, round to nearest int to avoid float drift
+    result = a @ b
+    np.round(result, out=result)
+    return result
 
 
 def load_test_cases(path="test_cases.txt"):
@@ -31,7 +33,7 @@ def load_test_cases(path="test_cases.txt"):
 
             rm = vals[idx]; idx += 1
             ry = vals[idx]; idx += 1
-            expected = np.array(vals[idx : idx + rm * ry], dtype=np.int64).reshape(rm, ry)
+            expected = np.array(vals[idx : idx + rm * ry], dtype=np.float64).reshape(rm, ry)
 
             cases.append({
                 "name": f"test_{test_id}",
