@@ -7,45 +7,61 @@ STRASSEN_THRESHOLD = 256
 
 def strassen(a, b):
     m, k = a.shape
-    k2, n = b.shape
+    _, n = b.shape
 
-    # Use standard BLAS for small matrices or non-square cases
+    # Use standard BLAS for small matrices
     if m <= STRASSEN_THRESHOLD or k <= STRASSEN_THRESHOLD or n <= STRASSEN_THRESHOLD:
         return a @ b
 
     # Pad to even dimensions
-    m2 = (m + 1) // 2
-    k2_half = (k + 1) // 2
-    n2 = (n + 1) // 2
+    mp = m + (m & 1)
+    kp = k + (k & 1)
+    np_ = n + (n & 1)
 
-    # Split A and B into quadrants
-    a11 = a[:m2, :k2_half]
-    a12 = a[:m2, k2_half:k]
-    a21 = a[m2:m, :k2_half]
-    a22 = a[m2:m, k2_half:k]
+    if mp != m or kp != k:
+        a_pad = np.zeros((mp, kp), dtype=np.float32)
+        a_pad[:m, :k] = a
+    else:
+        a_pad = a
 
-    b11 = b[:k2_half, :n2]
-    b12 = b[:k2_half, n2:n]
-    b21 = b[k2_half:k, :n2]
-    b22 = b[k2_half:k, n2:n]
+    if kp != k or np_ != n:
+        b_pad = np.zeros((kp, np_), dtype=np.float32)
+        b_pad[:k, :n] = b
+    else:
+        b_pad = b
 
-    # Strassen's 7 products
-    m1 = (a11 + a22) @ (b11 + b22)
-    m2_s = (a21 + a22) @ b11
-    m3 = a11 @ (b12 - b22)
-    m4 = a22 @ (b21 - b11)
-    m5 = (a11 + a12) @ b22
-    m6 = (a21 - a11) @ (b11 + b12)
-    m7 = (a12 - a22) @ (b21 + b22)
+    h_m = mp // 2
+    h_k = kp // 2
+    h_n = np_ // 2
 
-    # Combine results
-    c = np.empty((m, n), dtype=np.float32)
-    c[:m2, :n2] = m1 + m4 - m5 + m7
-    c[:m2, n2:n] = m3 + m5
-    c[m2:m, :n2] = m2_s + m4
-    c[m2:m, n2:n] = m1 - m2_s + m3 + m6
+    # Split into quadrants
+    a11 = a_pad[:h_m, :h_k]
+    a12 = a_pad[:h_m, h_k:]
+    a21 = a_pad[h_m:, :h_k]
+    a22 = a_pad[h_m:, h_k:]
 
-    return c
+    b11 = b_pad[:h_k, :h_n]
+    b12 = b_pad[:h_k, h_n:]
+    b21 = b_pad[h_k:, :h_n]
+    b22 = b_pad[h_k:, h_n:]
+
+    # Strassen's 7 products (use @ for BLAS-backed sub-multiplications)
+    s1 = (a11 + a22) @ (b11 + b22)
+    s2 = (a21 + a22) @ b11
+    s3 = a11 @ (b12 - b22)
+    s4 = a22 @ (b21 - b11)
+    s5 = (a11 + a12) @ b22
+    s6 = (a21 - a11) @ (b11 + b12)
+    s7 = (a12 - a22) @ (b21 + b22)
+
+    # Combine
+    c = np.empty((mp, np_), dtype=np.float32)
+    c[:h_m, :h_n] = s1 + s4 - s5 + s7
+    c[:h_m, h_n:] = s3 + s5
+    c[h_m:, :h_n] = s2 + s4
+    c[h_m:, h_n:] = s1 - s2 + s3 + s6
+
+    return c[:m, :n]
 
 
 def multiply_matrices(a, b):
