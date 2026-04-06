@@ -5,11 +5,9 @@ import numpy as np
 
 
 def multiply_matrices(a, b):
-    # a and b are pre-built dense float32 numpy arrays
-    # BLAS sgemm — 2x SIMD throughput vs dgemm
-    result = a @ b
-    np.round(result, out=result)
-    return result
+    # a and b are pre-built Fortran-contiguous float32 arrays
+    # BLAS sgemm — Fortran order avoids internal transpose
+    return a @ b
 
 
 def load_test_cases(path="test_cases.txt"):
@@ -23,12 +21,12 @@ def load_test_cases(path="test_cases.txt"):
 
             m = vals[idx]; idx += 1
             n = vals[idx]; idx += 1
-            a = np.array(vals[idx : idx + m * n], dtype=np.float32).reshape(m, n)
+            a = np.asfortranarray(np.array(vals[idx : idx + m * n], dtype=np.float32).reshape(m, n))
             idx += m * n
 
             n2 = vals[idx]; idx += 1
             y = vals[idx]; idx += 1
-            b = np.array(vals[idx : idx + n2 * y], dtype=np.float32).reshape(n2, y)
+            b = np.asfortranarray(np.array(vals[idx : idx + n2 * y], dtype=np.float32).reshape(n2, y))
             idx += n2 * y
 
             rm = vals[idx]; idx += 1
