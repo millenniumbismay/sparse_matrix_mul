@@ -7,8 +7,16 @@ warnings.filterwarnings('ignore')
 np.seterr(all='ignore')
 
 
-def multiply_matrices(a, b):
-    return a @ b
+def multiply_matrices(a, b, a_nz_rows, b_nz_cols, k_nz, m, n):
+    # a_reduced: only non-zero rows of A, only shared-dimension cols that matter
+    # b_reduced: only shared-dimension rows that matter, only non-zero cols of B
+    a_red = a[np.ix_(a_nz_rows, k_nz)]
+    b_red = b[np.ix_(k_nz, b_nz_cols)]
+    c_red = a_red @ b_red
+    # Place results back into full result matrix
+    result = np.zeros((m, n), dtype=np.float32)
+    result[np.ix_(a_nz_rows, b_nz_cols)] = c_red
+    return result
 
 
 def load_test_cases(path="test_cases.txt"):
@@ -34,11 +42,24 @@ def load_test_cases(path="test_cases.txt"):
             ry = vals[idx]; idx += 1
             expected = np.array(vals[idx : idx + rm * ry], dtype=np.float32).reshape(rm, ry)
 
+            # Pre-identify non-zero rows/cols for dimension reduction
+            a_nz_rows = np.where(np.any(a != 0, axis=1))[0]
+            b_nz_cols = np.where(np.any(b != 0, axis=0))[0]
+            # Shared dimension: k values where either A has non-zero col or B has non-zero row
+            a_nz_cols = np.where(np.any(a != 0, axis=0))[0]
+            b_nz_rows = np.where(np.any(b != 0, axis=1))[0]
+            k_nz = np.union1d(a_nz_cols, b_nz_rows)
+
             cases.append({
                 "name": f"test_{test_id}",
                 "a": a,
                 "b": b,
                 "expected": expected,
+                "a_nz_rows": a_nz_rows,
+                "b_nz_cols": b_nz_cols,
+                "k_nz": k_nz,
+                "m": m,
+                "n": y,
             })
     return cases
 
@@ -60,7 +81,7 @@ def main():
     for tc in test_cases:
         name = tc["name"]
         start = time.perf_counter()
-        actual = multiply_matrices(tc["a"], tc["b"])
+        actual = multiply_matrices(tc["a"], tc["b"], tc["a_nz_rows"], tc["b_nz_cols"], tc["k_nz"], tc["m"], tc["n"])
         latency_ms = (time.perf_counter() - start) * 1_000
 
         if np.array_equal(actual, tc["expected"]):
