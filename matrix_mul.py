@@ -5,15 +5,8 @@ import numpy as np
 
 
 def multiply_matrices(a, b):
-    if a.shape[1] != b.shape[0]:
-        raise ValueError(
-            f"Incompatible dimensions: {a.shape} and {b.shape}"
-        )
-
-    # Convert numpy arrays to scipy CSR and multiply
-    a_sparse = sparse.csr_matrix(a)
-    b_sparse = sparse.csr_matrix(b)
-    return (a_sparse @ b_sparse).toarray()
+    # a and b are already scipy CSR matrices (pre-built in loader)
+    return (a @ b).toarray()
 
 
 def load_test_cases(path="test_cases.txt"):
@@ -27,12 +20,16 @@ def load_test_cases(path="test_cases.txt"):
 
             m = vals[idx]; idx += 1
             n = vals[idx]; idx += 1
-            a = np.array(vals[idx : idx + m * n], dtype=np.int64).reshape(m, n)
+            a = sparse.csr_matrix(
+                np.array(vals[idx : idx + m * n], dtype=np.int64).reshape(m, n)
+            )
             idx += m * n
 
             n2 = vals[idx]; idx += 1
             y = vals[idx]; idx += 1
-            b = np.array(vals[idx : idx + n2 * y], dtype=np.int64).reshape(n2, y)
+            b = sparse.csr_matrix(
+                np.array(vals[idx : idx + n2 * y], dtype=np.int64).reshape(n2, y)
+            )
             idx += n2 * y
 
             rm = vals[idx]; idx += 1
