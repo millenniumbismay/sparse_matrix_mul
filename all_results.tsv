@@ -31,3 +31,4 @@ apr06_0313	29	48d2d3e	50/50	356.1043 ms	discard	float16: no BLAS support in nump
 apr06_0313	30	1474e1b	50/50	0.2205 ms	discard	1000x1000 warmup: no improvement over 500x500 warmup. within variance
 apr06_0313	31	65258aa	50/50	1.5919 ms	discard	scipy sgemm wrapper: 7.4x slower. Python-level overhead far exceeds numpy @ dispatch
 apr06_0313	32	236819a	50/50	0.2233 ms	keep	confirmed best: Fortran float32 @ + 500x500 warmup. stable 0.19-0.22ms range. ~40000x over baseline
+apr06_0313	33	6cbc201	50/50	0.2671 ms	discard	vDSP_mmul: single-threaded, can't match multi-threaded BLAS. 22% slower
