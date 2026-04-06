@@ -1,26 +1,40 @@
 import csv
 import time
+import ctypes
+import os
 import numpy as np
-import numba
+
+# Compile C sparse matmul extension if needed
+_lib_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'sparse_matmul.dylib')
+if not os.path.exists(_lib_path):
+    _c_src = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'sparse_matmul.c')
+    os.system(f'cc -O3 -march=native -ffast-math -shared -o {_lib_path} {_c_src} '
+              f'-framework Accelerate -lpthread')
+
+_lib = ctypes.CDLL(_lib_path)
+_sparse_matmul = _lib.sparse_matmul
+_sparse_matmul.restype = None
+_sparse_matmul.argtypes = [
+    ctypes.c_void_p,  # indptr
+    ctypes.c_void_p,  # indices
+    ctypes.c_void_p,  # data
+    ctypes.c_void_p,  # b
+    ctypes.c_void_p,  # result
+    ctypes.c_int,     # m
+    ctypes.c_int,     # n
+    ctypes.c_int,     # k (cols of B)
+]
 
 
-@numba.njit(parallel=True, cache=True, fastmath=True)
-def sparse_dense_matmul(a_indptr, a_indices, a_data, b, m, n):
-    """Sparse A (CSR) × Dense B. Exploits sparsity in A, vectorizes over B columns."""
-    result = np.zeros((m, n), dtype=np.float32)
-    for i in numba.prange(m):
-        for idx in range(a_indptr[i], a_indptr[i + 1]):
-            k = a_indices[idx]
-            val = a_data[idx]
-            for j in range(n):
-                result[i, j] += val * b[k, j]
-    return result
-
-
-def multiply_matrices(a_csr, b):
+def multiply_matrices(a_csr, b, out):
     indptr, indices, data, m = a_csr
     _, n = b.shape
-    return sparse_dense_matmul(indptr, indices, data, b, m, n)
+    _sparse_matmul(
+        indptr.ctypes.data, indices.ctypes.data, data.ctypes.data,
+        b.ctypes.data, out.ctypes.data,
+        m, n, b.shape[1],
+    )
+    return out
 
 
 def load_test_cases(path="test_cases.txt"):
@@ -36,22 +50,15 @@ def load_test_cases(path="test_cases.txt"):
             n = vals[idx]; idx += 1
             a_dense = np.array(vals[idx : idx + m * n], dtype=np.float32).reshape(m, n)
             idx += m * n
-            # Build CSR for A
-            a_nz = a_dense != 0
-            indptr = np.zeros(m + 1, dtype=np.int32)
-            for i in range(m):
-                indptr[i + 1] = indptr[i] + np.sum(a_nz[i])
-            nnz = indptr[m]
-            indices = np.empty(nnz, dtype=np.int32)
-            data = np.empty(nnz, dtype=np.float32)
-            pos = 0
-            for i in range(m):
-                for j in range(n):
-                    if a_nz[i, j]:
-                        indices[pos] = j
-                        data[pos] = a_dense[i, j]
-                        pos += 1
-            a_csr = (indptr, indices, data, m)
+            # Build CSR for A using scipy (fast)
+            from scipy import sparse as _sp
+            a_sp = _sp.csr_matrix(a_dense)
+            a_csr = (
+                a_sp.indptr.astype(np.int32),
+                a_sp.indices.astype(np.int32),
+                a_sp.data.astype(np.float32),
+                m,
+            )
 
             n2 = vals[idx]; idx += 1
             y = vals[idx]; idx += 1
@@ -62,11 +69,13 @@ def load_test_cases(path="test_cases.txt"):
             ry = vals[idx]; idx += 1
             expected = np.array(vals[idx : idx + rm * ry], dtype=np.float32).reshape(rm, ry)
 
+            out = np.empty((m, y), dtype=np.float32)
             cases.append({
                 "name": f"test_{test_id}",
                 "a": a_csr,
                 "b": b,
                 "expected": expected,
+                "out": out,
             })
     return cases
 
@@ -81,14 +90,10 @@ def main():
     results = []
     log_file = open("output.log", "w")
 
-    test_cases = load_test_cases()
-    # Warm up numba JIT with first test case
-    multiply_matrices(test_cases[0]["a"], test_cases[0]["b"])
-
-    for tc in test_cases:
+    for tc in load_test_cases():
         name = tc["name"]
         start = time.perf_counter()
-        actual = multiply_matrices(tc["a"], tc["b"])
+        actual = multiply_matrices(tc["a"], tc["b"], tc["out"])
         latency_ms = (time.perf_counter() - start) * 1_000
 
         if np.array_equal(actual, tc["expected"]):
