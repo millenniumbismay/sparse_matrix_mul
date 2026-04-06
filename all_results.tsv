@@ -34,3 +34,4 @@ apr06_0313	32	236819a	50/50	0.2233 ms	keep	confirmed best: Fortran float32 @ + 5
 apr06_0313	33	6cbc201	50/50	0.2671 ms	discard	vDSP_mmul: single-threaded, can't match multi-threaded BLAS. 22% slower
 apr06_0313	34	a29607f	50/50	0.2303 ms	keep	micro-optimized timing path (cached perf_counter, extracted dict lookups). within variance of best
 apr06_0313	35	14ebaf2	50/50	0.1750 ms	keep	NEW BEST! inlined a@b eliminates function call. 50490x over baseline. consistent sub-0.2ms
+apr06_0313	36	4106e8f	50/50	0.2086 ms	discard	C-contiguous arrays: 19% slower than Fortran. BLAS prefers column-major. reverted to Fortran
