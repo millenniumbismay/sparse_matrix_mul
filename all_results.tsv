@@ -21,3 +21,4 @@ apr06_0313	19	6947f25	50/50	0.4581 ms	discard	numba JIT sparse CSR*dense: 2x slo
 apr06_0313	20	d1ee295	50/50	1.6194 ms	discard	C ext sparse CSR*dense with saxpy: 7.4x slower! single-threaded + saxpy overhead per element
 apr06_0313	21	df650a8	50/50	0.4874 ms	discard	C ext GCD parallel + vDSP_vsma: 2.2x slower than BLAS. AMX-backed sgemm unbeatable for dense
 apr06_0313	22	368644f	50/50	0.7175 ms	discard	Strassen O(n^2.8): 3.3x slower. padding/slicing/temporary arrays overhead too high for n<1000
+apr06_0313	23	d3e6617	50/50	33.2011 ms	discard	PyTorch MPS GPU: 150x slower! kernel launch + sync overhead dominates for n<1000
