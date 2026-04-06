@@ -5,7 +5,7 @@ import numpy as np
 
 
 def multiply_matrices(a, b):
-    # a and b are already scipy CSR matrices (pre-built in loader)
+    # a is CSR, b is CSC (pre-built in loader)
     return (a @ b).toarray()
 
 
@@ -27,7 +27,7 @@ def load_test_cases(path="test_cases.txt"):
 
             n2 = vals[idx]; idx += 1
             y = vals[idx]; idx += 1
-            b = sparse.csr_matrix(
+            b = sparse.csc_matrix(
                 np.array(vals[idx : idx + n2 * y], dtype=np.int64).reshape(n2, y)
             )
             idx += n2 * y
