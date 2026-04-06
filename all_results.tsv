@@ -1,1 +1,5 @@
 branch_tag	experiment_id	commit_hash	solutions_passed	average_latency	status	observation
+apr06_0313	1	7375e96	50/50	8835.6793 ms	keep	baseline: naive O(n^3) triple loop, no sparse optimization
+apr06_0313	2	c405ff1	50/50	223.3681 ms	keep	sparse row repr (skip zeros in A and B) - 39.6x speedup over baseline
+apr06_0313	3	134fde9	50/50	20.1998 ms	keep	scipy CSR sparse matmul - 11x over exp2, 437x over baseline
+apr06_0313	4	bfd2c23	50/50	34.9952 ms	discard	COO direct construction slower than scipy internal dense-to-CSR. Python loop overhead negated benefit. Reverted.

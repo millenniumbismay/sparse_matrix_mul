@@ -1,6 +1,5 @@
 import csv
 import time
-from scipy import sparse
 import numpy as np
 
 
@@ -13,12 +12,12 @@ def multiply_matrices(a, b):
             f"Incompatible dimensions: ({rows_a}x{cols_a}) and ({rows_b}x{cols_b})"
         )
 
-    # Convert to scipy CSR sparse matrices and multiply
-    a_sparse = sparse.csr_matrix(a, dtype=np.int64)
-    b_sparse = sparse.csr_matrix(b, dtype=np.int64)
-    result_sparse = a_sparse @ b_sparse
+    # Use numpy dense BLAS-backed matmul
+    a_np = np.array(a, dtype=np.int64)
+    b_np = np.array(b, dtype=np.int64)
+    result = a_np @ b_np
 
-    return result_sparse.toarray().tolist()
+    return result.tolist()
 
 
 def load_test_cases(path="test_cases.txt"):
