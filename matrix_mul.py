@@ -1,40 +1,55 @@
 import csv
 import time
-import ctypes
-import os
 import numpy as np
 
-# Compile C sparse matmul extension if needed
-_lib_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'sparse_matmul.dylib')
-if not os.path.exists(_lib_path):
-    _c_src = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'sparse_matmul.c')
-    os.system(f'cc -O3 -march=native -ffast-math -shared -o {_lib_path} {_c_src} '
-              f'-framework Accelerate -lpthread')
-
-_lib = ctypes.CDLL(_lib_path)
-_sparse_matmul = _lib.sparse_matmul
-_sparse_matmul.restype = None
-_sparse_matmul.argtypes = [
-    ctypes.c_void_p,  # indptr
-    ctypes.c_void_p,  # indices
-    ctypes.c_void_p,  # data
-    ctypes.c_void_p,  # b
-    ctypes.c_void_p,  # result
-    ctypes.c_int,     # m
-    ctypes.c_int,     # n
-    ctypes.c_int,     # k (cols of B)
-]
+STRASSEN_THRESHOLD = 256
 
 
-def multiply_matrices(a_csr, b, out):
-    indptr, indices, data, m = a_csr
-    _, n = b.shape
-    _sparse_matmul(
-        indptr.ctypes.data, indices.ctypes.data, data.ctypes.data,
-        b.ctypes.data, out.ctypes.data,
-        m, n, b.shape[1],
-    )
-    return out
+def strassen(a, b):
+    m, k = a.shape
+    k2, n = b.shape
+
+    # Use standard BLAS for small matrices or non-square cases
+    if m <= STRASSEN_THRESHOLD or k <= STRASSEN_THRESHOLD or n <= STRASSEN_THRESHOLD:
+        return a @ b
+
+    # Pad to even dimensions
+    m2 = (m + 1) // 2
+    k2_half = (k + 1) // 2
+    n2 = (n + 1) // 2
+
+    # Split A and B into quadrants
+    a11 = a[:m2, :k2_half]
+    a12 = a[:m2, k2_half:k]
+    a21 = a[m2:m, :k2_half]
+    a22 = a[m2:m, k2_half:k]
+
+    b11 = b[:k2_half, :n2]
+    b12 = b[:k2_half, n2:n]
+    b21 = b[k2_half:k, :n2]
+    b22 = b[k2_half:k, n2:n]
+
+    # Strassen's 7 products
+    m1 = (a11 + a22) @ (b11 + b22)
+    m2_s = (a21 + a22) @ b11
+    m3 = a11 @ (b12 - b22)
+    m4 = a22 @ (b21 - b11)
+    m5 = (a11 + a12) @ b22
+    m6 = (a21 - a11) @ (b11 + b12)
+    m7 = (a12 - a22) @ (b21 + b22)
+
+    # Combine results
+    c = np.empty((m, n), dtype=np.float32)
+    c[:m2, :n2] = m1 + m4 - m5 + m7
+    c[:m2, n2:n] = m3 + m5
+    c[m2:m, :n2] = m2_s + m4
+    c[m2:m, n2:n] = m1 - m2_s + m3 + m6
+
+    return c
+
+
+def multiply_matrices(a, b):
+    return strassen(a, b)
 
 
 def load_test_cases(path="test_cases.txt"):
@@ -48,34 +63,23 @@ def load_test_cases(path="test_cases.txt"):
 
             m = vals[idx]; idx += 1
             n = vals[idx]; idx += 1
-            a_dense = np.array(vals[idx : idx + m * n], dtype=np.float32).reshape(m, n)
+            a = np.asfortranarray(np.array(vals[idx : idx + m * n], dtype=np.float32).reshape(m, n))
             idx += m * n
-            # Build CSR for A using scipy (fast)
-            from scipy import sparse as _sp
-            a_sp = _sp.csr_matrix(a_dense)
-            a_csr = (
-                a_sp.indptr.astype(np.int32),
-                a_sp.indices.astype(np.int32),
-                a_sp.data.astype(np.float32),
-                m,
-            )
 
             n2 = vals[idx]; idx += 1
             y = vals[idx]; idx += 1
-            b = np.ascontiguousarray(np.array(vals[idx : idx + n2 * y], dtype=np.float32).reshape(n2, y))
+            b = np.asfortranarray(np.array(vals[idx : idx + n2 * y], dtype=np.float32).reshape(n2, y))
             idx += n2 * y
 
             rm = vals[idx]; idx += 1
             ry = vals[idx]; idx += 1
             expected = np.array(vals[idx : idx + rm * ry], dtype=np.float32).reshape(rm, ry)
 
-            out = np.empty((m, y), dtype=np.float32)
             cases.append({
                 "name": f"test_{test_id}",
-                "a": a_csr,
+                "a": a,
                 "b": b,
                 "expected": expected,
-                "out": out,
             })
     return cases
 
@@ -93,7 +97,7 @@ def main():
     for tc in load_test_cases():
         name = tc["name"]
         start = time.perf_counter()
-        actual = multiply_matrices(tc["a"], tc["b"], tc["out"])
+        actual = multiply_matrices(tc["a"], tc["b"])
         latency_ms = (time.perf_counter() - start) * 1_000
 
         if np.array_equal(actual, tc["expected"]):

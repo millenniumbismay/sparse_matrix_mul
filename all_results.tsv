@@ -19,3 +19,4 @@ apr06_0313	17	ecf50f4	50/50	0.2130 ms	keep	direct cblas_sgemm: marginally better
 apr06_0313	18	273011d	50/50	0.2216 ms	discard	pre-alloc output + pre-compute ptrs: no improvement (0.22 vs 0.21). numpy allocator already fast
 apr06_0313	19	6947f25	50/50	0.4581 ms	discard	numba JIT sparse CSR*dense: 2x slower than BLAS. Apple Accelerate too optimized for numba to compete
 apr06_0313	20	d1ee295	50/50	1.6194 ms	discard	C ext sparse CSR*dense with saxpy: 7.4x slower! single-threaded + saxpy overhead per element
+apr06_0313	21	df650a8	50/50	0.4874 ms	discard	C ext GCD parallel + vDSP_vsma: 2.2x slower than BLAS. AMX-backed sgemm unbeatable for dense
