@@ -1,14 +1,37 @@
 import csv
 import time
 import warnings
+import ctypes
 import numpy as np
 
 warnings.filterwarnings('ignore')
 np.seterr(all='ignore')
 
+# Apple's vDSP_mmul — optimized specifically for float matrix multiplication
+_acc = ctypes.CDLL('/System/Library/Frameworks/Accelerate.framework/Accelerate')
+_vDSP_mmul = _acc.vDSP_mmul
+_vDSP_mmul.restype = None
+_vDSP_mmul.argtypes = [
+    ctypes.c_void_p,  # __A
+    ctypes.c_long,    # __IA (stride)
+    ctypes.c_void_p,  # __B
+    ctypes.c_long,    # __IB (stride)
+    ctypes.c_void_p,  # __C
+    ctypes.c_long,    # __IC (stride)
+    ctypes.c_ulong,   # __M
+    ctypes.c_ulong,   # __N
+    ctypes.c_ulong,   # __P
+]
 
-def multiply_matrices(a, b):
-    return a @ b
+
+def multiply_matrices(a, b, out, m, k, n):
+    _vDSP_mmul(
+        a.ctypes.data, 1,
+        b.ctypes.data, 1,
+        out.ctypes.data, 1,
+        m, n, k,
+    )
+    return out
 
 
 def load_test_cases(path="test_cases.txt"):
@@ -22,23 +45,28 @@ def load_test_cases(path="test_cases.txt"):
 
             m = vals[idx]; idx += 1
             n = vals[idx]; idx += 1
-            a = np.asfortranarray(np.array(vals[idx : idx + m * n], dtype=np.float32).reshape(m, n))
+            a = np.ascontiguousarray(np.array(vals[idx : idx + m * n], dtype=np.float32).reshape(m, n))
             idx += m * n
 
             n2 = vals[idx]; idx += 1
             y = vals[idx]; idx += 1
-            b = np.asfortranarray(np.array(vals[idx : idx + n2 * y], dtype=np.float32).reshape(n2, y))
+            b = np.ascontiguousarray(np.array(vals[idx : idx + n2 * y], dtype=np.float32).reshape(n2, y))
             idx += n2 * y
 
             rm = vals[idx]; idx += 1
             ry = vals[idx]; idx += 1
             expected = np.array(vals[idx : idx + rm * ry], dtype=np.float32).reshape(rm, ry)
 
+            out = np.empty((m, y), dtype=np.float32)
             cases.append({
                 "name": f"test_{test_id}",
                 "a": a,
                 "b": b,
                 "expected": expected,
+                "out": out,
+                "m": m,
+                "k": n,
+                "n": y,
             })
     return cases
 
@@ -61,7 +89,7 @@ def main():
     for tc in test_cases:
         name = tc["name"]
         start = time.perf_counter()
-        actual = multiply_matrices(tc["a"], tc["b"])
+        actual = multiply_matrices(tc["a"], tc["b"], tc["out"], tc["m"], tc["k"], tc["n"])
         latency_ms = (time.perf_counter() - start) * 1_000
 
         if np.array_equal(actual, tc["expected"]):
