@@ -18,12 +18,12 @@ def load_test_cases(path="test_cases.txt"):
 
             m = vals[idx]; idx += 1
             n = vals[idx]; idx += 1
-            a = np.asfortranarray(np.array(vals[idx : idx + m * n], dtype=np.float32).reshape(m, n))
+            a = np.array(vals[idx : idx + m * n], dtype=np.float32).reshape(m, n)
             idx += m * n
 
             n2 = vals[idx]; idx += 1
             y = vals[idx]; idx += 1
-            b = np.asfortranarray(np.array(vals[idx : idx + n2 * y], dtype=np.float32).reshape(n2, y))
+            b = np.array(vals[idx : idx + n2 * y], dtype=np.float32).reshape(n2, y)
             idx += n2 * y
 
             rm = vals[idx]; idx += 1
