@@ -1,0 +1,5 @@
+test_case	solution	latency	observation
+test_1	correct	0.3465 ms	Output matches expected result
+test_2	correct	0.2856 ms	Output matches expected result
+test_3	correct	0.3026 ms	Output matches expected result
+SUMMARY	3/3 passed	0.3116 ms	Average latency across all test cases
