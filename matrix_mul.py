@@ -50,8 +50,8 @@ def main():
     log_file = open("output.log", "w")
 
     test_cases = load_test_cases()
-    # Warmup BLAS/numpy dispatch with a small matmul
-    _w = np.ones((2, 2), dtype=np.float32) @ np.ones((2, 2), dtype=np.float32)
+    # Warmup BLAS with a medium-sized matmul to initialize Accelerate threadpool
+    _w = np.ones((500, 500), dtype=np.float32) @ np.ones((500, 500), dtype=np.float32)
 
     for tc in test_cases:
         name = tc["name"]
