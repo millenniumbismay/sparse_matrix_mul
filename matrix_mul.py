@@ -22,17 +22,17 @@ def load_test_cases(path="test_cases.txt"):
 
             m = vals[idx]; idx += 1
             n = vals[idx]; idx += 1
-            a = np.array(vals[idx : idx + m * n], dtype=np.float16).reshape(m, n)
+            a = np.asfortranarray(np.array(vals[idx : idx + m * n], dtype=np.float32).reshape(m, n))
             idx += m * n
 
             n2 = vals[idx]; idx += 1
             y = vals[idx]; idx += 1
-            b = np.array(vals[idx : idx + n2 * y], dtype=np.float16).reshape(n2, y)
+            b = np.asfortranarray(np.array(vals[idx : idx + n2 * y], dtype=np.float32).reshape(n2, y))
             idx += n2 * y
 
             rm = vals[idx]; idx += 1
             ry = vals[idx]; idx += 1
-            expected = np.array(vals[idx : idx + rm * ry], dtype=np.float16).reshape(rm, ry)
+            expected = np.array(vals[idx : idx + rm * ry], dtype=np.float32).reshape(rm, ry)
 
             cases.append({
                 "name": f"test_{test_id}",
@@ -55,7 +55,9 @@ def main():
 
     test_cases = load_test_cases()
     # Warmup BLAS with a medium-sized matmul to initialize Accelerate threadpool
-    _w = np.ones((500, 500), dtype=np.float16) @ np.ones((500, 500), dtype=np.float16)
+    # Large warmup to fully initialize Accelerate threadpool and AMX
+    _w = np.ones((1000, 1000), dtype=np.float32) @ np.ones((1000, 1000), dtype=np.float32)
+    del _w
 
     for tc in test_cases:
         name = tc["name"]
