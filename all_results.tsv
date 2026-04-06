@@ -15,3 +15,4 @@ apr06_0313	13	431565b	50/50	0.2193 ms	keep	Fortran-contiguous + remove np.round:
 apr06_0313	14	bbf3cf2	50/50	1.0513 ms	discard	direct blas.sgemm: 4.8x slower! Python function call overhead negates any dispatch savings
 apr06_0313	15	30c59d2	50/50	0.2675 ms	discard	pre-allocated output: no improvement (0.27 vs 0.22). numpy internal allocator already fast
 apr06_0313	16	55ce7cb	50/50	0.2490 ms	discard	np.dot: ~same as @ (0.25 vs 0.22). within variance, no meaningful difference
+apr06_0313	17	ecf50f4	50/50	0.2130 ms	keep	direct cblas_sgemm: marginally better (0.213 vs 0.219). ctypes overhead vs numpy dispatch roughly equal

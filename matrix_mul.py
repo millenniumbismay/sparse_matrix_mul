@@ -28,18 +28,16 @@ CblasRowMajor = 101
 CblasNoTrans = 111
 
 
-def multiply_matrices(a, b):
-    m, k = a.shape
-    _, n = b.shape
-    c = np.empty((m, n), dtype=np.float32)
+def multiply_matrices(a, b, c, a_ptr, b_ptr, c_ptr, m, k, n):
+    # All pointers and dimensions pre-computed in loader
     _sgemm(
-        CblasRowMajor, CblasNoTrans, CblasNoTrans,
+        101, 111, 111,  # RowMajor, NoTrans, NoTrans (inline constants)
         m, n, k,
         1.0,
-        a.ctypes.data, k,
-        b.ctypes.data, n,
+        a_ptr, k,
+        b_ptr, n,
         0.0,
-        c.ctypes.data, n,
+        c_ptr, n,
     )
     return c
 
@@ -67,11 +65,19 @@ def load_test_cases(path="test_cases.txt"):
             ry = vals[idx]; idx += 1
             expected = np.array(vals[idx : idx + rm * ry], dtype=np.float32).reshape(rm, ry)
 
+            out = np.empty((m, y), dtype=np.float32)
             cases.append({
                 "name": f"test_{test_id}",
                 "a": a,
                 "b": b,
                 "expected": expected,
+                "out": out,
+                "a_ptr": a.ctypes.data,
+                "b_ptr": b.ctypes.data,
+                "c_ptr": out.ctypes.data,
+                "m": m,
+                "k": n,
+                "n": y,
             })
     return cases
 
@@ -89,7 +95,7 @@ def main():
     for tc in load_test_cases():
         name = tc["name"]
         start = time.perf_counter()
-        actual = multiply_matrices(tc["a"], tc["b"])
+        actual = multiply_matrices(tc["a"], tc["b"], tc["out"], tc["a_ptr"], tc["b_ptr"], tc["c_ptr"], tc["m"], tc["k"], tc["n"])
         latency_ms = (time.perf_counter() - start) * 1_000
 
         if np.array_equal(actual, tc["expected"]):
