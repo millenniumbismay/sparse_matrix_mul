@@ -11,3 +11,4 @@ apr06_0313	9	c207742	50/50	0.7598 ms	keep	float64 BLAS dgemm: 7.6x over sparse. 
 apr06_0313	10	770f718	50/50	0.5069 ms	keep	skip astype, in-place np.round, float64 expected. 33% faster. 17427x over baseline
 apr06_0313	11	333bc4d	50/50	0.5947 ms	discard	remove np.round: 17% worse (variance?). simpler code but less consistent
 apr06_0313	12	984aad4	50/50	0.2823 ms	keep	float32 sgemm: 44% faster than float64 dgemm. 2x SIMD throughput confirmed. 31300x over baseline
+apr06_0313	13	431565b	50/50	0.2193 ms	keep	Fortran-contiguous + remove np.round: 22% faster. BLAS avoids internal transpose. 40290x over baseline

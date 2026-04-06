@@ -1,13 +1,12 @@
 import csv
 import time
-from scipy import sparse
 import numpy as np
+from scipy.linalg import blas
 
 
 def multiply_matrices(a, b):
-    # a and b are pre-built Fortran-contiguous float32 arrays
-    # BLAS sgemm — Fortran order avoids internal transpose
-    return a @ b
+    # Direct BLAS sgemm call — bypasses numpy matmul dispatch overhead
+    return blas.sgemm(1.0, a, b)
 
 
 def load_test_cases(path="test_cases.txt"):
