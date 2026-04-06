@@ -36,3 +36,4 @@ apr06_0313	34	a29607f	50/50	0.2303 ms	keep	micro-optimized timing path (cached p
 apr06_0313	35	14ebaf2	50/50	0.1750 ms	keep	NEW BEST! inlined a@b eliminates function call. 50490x over baseline. consistent sub-0.2ms
 apr06_0313	36	4106e8f	50/50	0.2086 ms	discard	C-contiguous arrays: 19% slower than Fortran. BLAS prefers column-major. reverted to Fortran
 apr06_0313	37	pending	50/50	0.9223 ms	discard	multi-size warmup (64-800): 5.3x worse! loop overhead + extra warmup iterations hurt. reverted to single 500x500
+apr06_0313	38	pending	50/50	1.0221 ms	discard	batched matmul (compute then validate): no improvement. cache eviction from validation not the bottleneck
