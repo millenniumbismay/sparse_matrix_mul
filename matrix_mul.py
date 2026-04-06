@@ -3,10 +3,9 @@ import time
 import numpy as np
 
 
-def multiply_matrices(a, b, out):
-    # Pre-allocated output buffer avoids allocation in hot path
-    np.matmul(a, b, out=out)
-    return out
+def multiply_matrices(a, b):
+    # np.dot may have simpler dispatch than @ operator
+    return np.dot(a, b)
 
 
 def load_test_cases(path="test_cases.txt"):
@@ -32,14 +31,11 @@ def load_test_cases(path="test_cases.txt"):
             ry = vals[idx]; idx += 1
             expected = np.array(vals[idx : idx + rm * ry], dtype=np.float32).reshape(rm, ry)
 
-            out = np.empty((m, y), dtype=np.float32)
-
             cases.append({
                 "name": f"test_{test_id}",
                 "a": a,
                 "b": b,
                 "expected": expected,
-                "out": out,
             })
     return cases
 
@@ -57,7 +53,7 @@ def main():
     for tc in load_test_cases():
         name = tc["name"]
         start = time.perf_counter()
-        actual = multiply_matrices(tc["a"], tc["b"], tc["out"])
+        actual = multiply_matrices(tc["a"], tc["b"])
         latency_ms = (time.perf_counter() - start) * 1_000
 
         if np.array_equal(actual, tc["expected"]):
