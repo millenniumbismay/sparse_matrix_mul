@@ -1,5 +1,7 @@
 import csv
 import time
+from scipy import sparse
+import numpy as np
 
 
 def multiply_matrices(a, b):
@@ -11,32 +13,12 @@ def multiply_matrices(a, b):
             f"Incompatible dimensions: ({rows_a}x{cols_a}) and ({rows_b}x{cols_b})"
         )
 
-    # Build sparse representation of A: for each row, list of (col, value) where value != 0
-    a_sparse = []
-    for i in range(rows_a):
-        row_nz = []
-        for k in range(cols_a):
-            if a[i][k] != 0:
-                row_nz.append((k, a[i][k]))
-        a_sparse.append(row_nz)
+    # Convert to scipy CSR sparse matrices and multiply
+    a_sparse = sparse.csr_matrix(a, dtype=np.int64)
+    b_sparse = sparse.csr_matrix(b, dtype=np.int64)
+    result_sparse = a_sparse @ b_sparse
 
-    # Build sparse representation of B: for each row, list of (col, value) where value != 0
-    b_sparse = []
-    for k in range(rows_b):
-        row_nz = []
-        for j in range(cols_b):
-            if b[k][j] != 0:
-                row_nz.append((j, b[k][j]))
-        b_sparse.append(row_nz)
-
-    # Multiply using sparse row-by-row: for each non-zero a[i][k], scatter a[i][k] * b[k][j]
-    result = [[0] * cols_b for _ in range(rows_a)]
-    for i in range(rows_a):
-        for k, a_val in a_sparse[i]:
-            for j, b_val in b_sparse[k]:
-                result[i][j] += a_val * b_val
-
-    return result
+    return result_sparse.toarray().tolist()
 
 
 def load_test_cases(path="test_cases.txt"):
