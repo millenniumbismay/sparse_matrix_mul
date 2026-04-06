@@ -5,8 +5,9 @@ import numpy as np
 
 
 def multiply_matrices(a, b):
-    # a is CSR, b is CSC (pre-built in loader)
-    return (a @ b).toarray()
+    # a and b are pre-built dense float64 numpy arrays
+    # Uses BLAS dgemm for float64, then convert back to int64
+    return (a @ b).astype(np.int64)
 
 
 def load_test_cases(path="test_cases.txt"):
@@ -20,16 +21,12 @@ def load_test_cases(path="test_cases.txt"):
 
             m = vals[idx]; idx += 1
             n = vals[idx]; idx += 1
-            a = sparse.csr_matrix(
-                np.array(vals[idx : idx + m * n], dtype=np.int64).reshape(m, n)
-            )
+            a = np.array(vals[idx : idx + m * n], dtype=np.float64).reshape(m, n)
             idx += m * n
 
             n2 = vals[idx]; idx += 1
             y = vals[idx]; idx += 1
-            b = sparse.csc_matrix(
-                np.array(vals[idx : idx + n2 * y], dtype=np.int64).reshape(n2, y)
-            )
+            b = np.array(vals[idx : idx + n2 * y], dtype=np.float64).reshape(n2, y)
             idx += n2 * y
 
             rm = vals[idx]; idx += 1

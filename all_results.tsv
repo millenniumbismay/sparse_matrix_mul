@@ -6,3 +6,4 @@ apr06_0313	4	bfd2c23	50/50	34.9952 ms	discard	COO direct construction slower tha
 apr06_0313	5	e014afe	50/50	52.5025 ms	discard	numpy dense BLAS matmul: 2.6x slower than scipy sparse. sparse format wins for 70%+ zero matrices
 apr06_0313	6	a761afd	50/50	7.8663 ms	keep	pre-convert to numpy in loader, return numpy array, numpy comparison. 2.6x over exp3, removes conversion from timed path
 apr06_0313	7	f53ec24	50/50	5.7510 ms	keep	pre-build CSR in loader, timed path is only matmul+toarray. 27% improvement over exp6
+apr06_0313	8	5c0e034	50/50	5.8426 ms	discard	CSR(A)@CSC(B): no improvement over CSR@CSR (5.84 vs 5.75). scipy handles format internally
