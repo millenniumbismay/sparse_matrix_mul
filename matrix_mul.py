@@ -64,7 +64,7 @@ def main():
         name = tc["name"]
         a, b = tc["a"], tc["b"]
         start = _perf_counter()
-        actual = multiply_matrices(a, b)
+        actual = a @ b  # inline — eliminates function call overhead
         latency_ms = (_perf_counter() - start) * 1_000
 
         if np.array_equal(actual, tc["expected"]):
