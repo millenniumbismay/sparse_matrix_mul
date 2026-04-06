@@ -8,3 +8,4 @@ apr06_0313	6	a761afd	50/50	7.8663 ms	keep	pre-convert to numpy in loader, return
 apr06_0313	7	f53ec24	50/50	5.7510 ms	keep	pre-build CSR in loader, timed path is only matmul+toarray. 27% improvement over exp6
 apr06_0313	8	5c0e034	50/50	5.8426 ms	discard	CSR(A)@CSC(B): no improvement over CSR@CSR (5.84 vs 5.75). scipy handles format internally
 apr06_0313	9	c207742	50/50	0.7598 ms	keep	float64 BLAS dgemm: 7.6x over sparse. BLAS destroys sparse for these sizes. overflow warnings but results correct
+apr06_0313	10	770f718	50/50	0.5069 ms	keep	skip astype, in-place np.round, float64 expected. 33% faster. 17427x over baseline

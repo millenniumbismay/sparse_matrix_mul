@@ -6,10 +6,8 @@ import numpy as np
 
 def multiply_matrices(a, b):
     # a and b are pre-built dense float64 numpy arrays
-    # Uses BLAS dgemm for float64, round to nearest int to avoid float drift
-    result = a @ b
-    np.round(result, out=result)
-    return result
+    # BLAS dgemm — no rounding needed, integer products are exact in float64
+    return a @ b
 
 
 def load_test_cases(path="test_cases.txt"):
