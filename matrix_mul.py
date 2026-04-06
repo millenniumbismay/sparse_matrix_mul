@@ -2,13 +2,18 @@ import csv
 import time
 import warnings
 import numpy as np
+from scipy.linalg.blas import sgemm
 
 warnings.filterwarnings('ignore')
 np.seterr(all='ignore')
 
+# Cache reference to avoid attribute lookup
+_sgemm = sgemm
+
 
 def multiply_matrices(a, b):
-    return a @ b
+    # Both a,b are Fortran-contiguous float32 — sgemm works directly, no copy
+    return _sgemm(1.0, a, b)
 
 
 def load_test_cases(path="test_cases.txt"):
