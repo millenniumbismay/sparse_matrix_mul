@@ -26,3 +26,4 @@ apr06_0313	24	e820945	50/50	0.2742 ms	discard	Fortran float32 np.matmul(out=): n
 apr06_0313	25	e31676d	50/50	0.1926 ms	keep	Fortran float32 @ with 500x500 warmup: new best! warmup eliminates first-call penalty. 45870x over baseline
 apr06_0313	26	f7b0635	50/50	0.1992 ms	discard	C-contiguous: same as Fortran within variance
 apr06_0313	27	f637b7e	50/50	0.2076 ms	discard	suppress warnings: no significant improvement, within variance
+apr06_0313	28	9d5aaf3	50/50	1.8664 ms	discard	row/col elimination: 9.7x worse! fancy indexing overhead >> dimension reduction for random 70% sparsity

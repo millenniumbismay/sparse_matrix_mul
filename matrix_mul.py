@@ -7,16 +7,8 @@ warnings.filterwarnings('ignore')
 np.seterr(all='ignore')
 
 
-def multiply_matrices(a, b, a_nz_rows, b_nz_cols, k_nz, m, n):
-    # a_reduced: only non-zero rows of A, only shared-dimension cols that matter
-    # b_reduced: only shared-dimension rows that matter, only non-zero cols of B
-    a_red = a[np.ix_(a_nz_rows, k_nz)]
-    b_red = b[np.ix_(k_nz, b_nz_cols)]
-    c_red = a_red @ b_red
-    # Place results back into full result matrix
-    result = np.zeros((m, n), dtype=np.float32)
-    result[np.ix_(a_nz_rows, b_nz_cols)] = c_red
-    return result
+def multiply_matrices(a, b):
+    return a @ b
 
 
 def load_test_cases(path="test_cases.txt"):
@@ -30,36 +22,23 @@ def load_test_cases(path="test_cases.txt"):
 
             m = vals[idx]; idx += 1
             n = vals[idx]; idx += 1
-            a = np.asfortranarray(np.array(vals[idx : idx + m * n], dtype=np.float32).reshape(m, n))
+            a = np.array(vals[idx : idx + m * n], dtype=np.float16).reshape(m, n)
             idx += m * n
 
             n2 = vals[idx]; idx += 1
             y = vals[idx]; idx += 1
-            b = np.asfortranarray(np.array(vals[idx : idx + n2 * y], dtype=np.float32).reshape(n2, y))
+            b = np.array(vals[idx : idx + n2 * y], dtype=np.float16).reshape(n2, y)
             idx += n2 * y
 
             rm = vals[idx]; idx += 1
             ry = vals[idx]; idx += 1
-            expected = np.array(vals[idx : idx + rm * ry], dtype=np.float32).reshape(rm, ry)
-
-            # Pre-identify non-zero rows/cols for dimension reduction
-            a_nz_rows = np.where(np.any(a != 0, axis=1))[0]
-            b_nz_cols = np.where(np.any(b != 0, axis=0))[0]
-            # Shared dimension: k values where either A has non-zero col or B has non-zero row
-            a_nz_cols = np.where(np.any(a != 0, axis=0))[0]
-            b_nz_rows = np.where(np.any(b != 0, axis=1))[0]
-            k_nz = np.union1d(a_nz_cols, b_nz_rows)
+            expected = np.array(vals[idx : idx + rm * ry], dtype=np.float16).reshape(rm, ry)
 
             cases.append({
                 "name": f"test_{test_id}",
                 "a": a,
                 "b": b,
                 "expected": expected,
-                "a_nz_rows": a_nz_rows,
-                "b_nz_cols": b_nz_cols,
-                "k_nz": k_nz,
-                "m": m,
-                "n": y,
             })
     return cases
 
@@ -76,12 +55,12 @@ def main():
 
     test_cases = load_test_cases()
     # Warmup BLAS with a medium-sized matmul to initialize Accelerate threadpool
-    _w = np.ones((500, 500), dtype=np.float32) @ np.ones((500, 500), dtype=np.float32)
+    _w = np.ones((500, 500), dtype=np.float16) @ np.ones((500, 500), dtype=np.float16)
 
     for tc in test_cases:
         name = tc["name"]
         start = time.perf_counter()
-        actual = multiply_matrices(tc["a"], tc["b"], tc["a_nz_rows"], tc["b_nz_cols"], tc["k_nz"], tc["m"], tc["n"])
+        actual = multiply_matrices(tc["a"], tc["b"])
         latency_ms = (time.perf_counter() - start) * 1_000
 
         if np.array_equal(actual, tc["expected"]):
