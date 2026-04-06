@@ -1,23 +1,19 @@
 import csv
 import time
+from scipy import sparse
 import numpy as np
 
 
 def multiply_matrices(a, b):
-    rows_a, cols_a = len(a), len(a[0])
-    rows_b, cols_b = len(b), len(b[0])
-
-    if cols_a != rows_b:
+    if a.shape[1] != b.shape[0]:
         raise ValueError(
-            f"Incompatible dimensions: ({rows_a}x{cols_a}) and ({rows_b}x{cols_b})"
+            f"Incompatible dimensions: {a.shape} and {b.shape}"
         )
 
-    # Use numpy dense BLAS-backed matmul
-    a_np = np.array(a, dtype=np.int64)
-    b_np = np.array(b, dtype=np.int64)
-    result = a_np @ b_np
-
-    return result.tolist()
+    # Convert numpy arrays to scipy CSR and multiply
+    a_sparse = sparse.csr_matrix(a)
+    b_sparse = sparse.csr_matrix(b)
+    return (a_sparse @ b_sparse).toarray()
 
 
 def load_test_cases(path="test_cases.txt"):
@@ -31,17 +27,17 @@ def load_test_cases(path="test_cases.txt"):
 
             m = vals[idx]; idx += 1
             n = vals[idx]; idx += 1
-            a = [vals[idx + i * n : idx + (i + 1) * n] for i in range(m)]
+            a = np.array(vals[idx : idx + m * n], dtype=np.int64).reshape(m, n)
             idx += m * n
 
             n2 = vals[idx]; idx += 1
             y = vals[idx]; idx += 1
-            b = [vals[idx + i * y : idx + (i + 1) * y] for i in range(n2)]
+            b = np.array(vals[idx : idx + n2 * y], dtype=np.int64).reshape(n2, y)
             idx += n2 * y
 
             rm = vals[idx]; idx += 1
             ry = vals[idx]; idx += 1
-            expected = [vals[idx + i * ry : idx + (i + 1) * ry] for i in range(rm)]
+            expected = np.array(vals[idx : idx + rm * ry], dtype=np.int64).reshape(rm, ry)
 
             cases.append({
                 "name": f"test_{test_id}",
@@ -68,17 +64,14 @@ def main():
         actual = multiply_matrices(tc["a"], tc["b"])
         latency_ms = (time.perf_counter() - start) * 1_000
 
-        try:
-            assert actual == tc["expected"], (
-                f"Expected {tc['expected']}, got {actual}"
-            )
+        if np.array_equal(actual, tc["expected"]):
             solution = "correct"
             observation = "Output matches expected result"
             log(f"  PASS  {name} ({latency_ms:.4f} ms)", log_file)
-        except AssertionError as e:
+        else:
             solution = "incorrect"
-            observation = str(e)
-            log(f"  FAIL  {name} ({latency_ms:.4f} ms) — {e}", log_file)
+            observation = f"Output mismatch"
+            log(f"  FAIL  {name} ({latency_ms:.4f} ms) — output mismatch", log_file)
 
         results.append({
             "test_case": name,
