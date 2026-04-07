@@ -11,11 +11,27 @@ def multiply_matrices(a, b):
             f"Incompatible dimensions: ({rows_a}x{cols_a}) and ({rows_b}x{cols_b})"
         )
 
+    # Build row-indexed sparse representation of B: row_k -> [(col_j, val)]
+    b_rows = {}
+    for k in range(rows_b):
+        row_entries = []
+        for j in range(cols_b):
+            if b[k][j] != 0:
+                row_entries.append((j, b[k][j]))
+        if row_entries:
+            b_rows[k] = row_entries
+
+    # Multiply: for each non-zero A[i][k], accumulate A[i][k] * B[k][j]
     result = [[0] * cols_b for _ in range(rows_a)]
     for i in range(rows_a):
-        for j in range(cols_b):
-            for k in range(cols_a):
-                result[i][j] += a[i][k] * b[k][j]
+        for k in range(cols_a):
+            a_val = a[i][k]
+            if a_val == 0:
+                continue
+            if k not in b_rows:
+                continue
+            for j, b_val in b_rows[k]:
+                result[i][j] += a_val * b_val
 
     return result
 
