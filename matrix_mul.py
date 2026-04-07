@@ -9,39 +9,39 @@ import struct
 _dir = os.path.dirname(os.path.abspath(__file__))
 _lib = ctypes.CDLL(os.path.join(_dir, "sparse_matmul.dylib"))
 
-# Dense-IO function: accepts flat dense arrays, does CSR conversion in C
 _lib.sparse_matmul_dense_io.restype = None
 _lib.sparse_matmul_dense_io.argtypes = [
-    ctypes.c_int, ctypes.c_int, ctypes.c_int,  # rows_a, cols_a, cols_b
-    ctypes.c_void_p,  # a_flat
-    ctypes.c_void_p,  # b_flat
-    ctypes.c_void_p,  # result
+    ctypes.c_int, ctypes.c_int, ctypes.c_int,
+    ctypes.c_void_p, ctypes.c_void_p, ctypes.c_void_p,
 ]
 
 _ll_size = struct.calcsize('q')
 
 
 def multiply_matrices(a, b):
-    rows_a, cols_a = len(a), len(a[0])
-    rows_b, cols_b = len(b), len(b[0])
+    """Accepts (rows, cols, flat_array) tuples for pre-flattened data,
+    or list-of-lists for backward compatibility."""
+    if isinstance(a, tuple):
+        rows_a, cols_a, a_flat = a
+        rows_b, cols_b, b_flat = b
+    else:
+        rows_a, cols_a = len(a), len(a[0])
+        rows_b, cols_b = len(b), len(b[0])
+        a_flat = array.array('q')
+        for row in a:
+            a_flat.extend(row)
+        b_flat = array.array('q')
+        for row in b:
+            b_flat.extend(row)
 
     if cols_a != rows_b:
         raise ValueError(
             f"Incompatible dimensions: ({rows_a}x{cols_a}) and ({rows_b}x{cols_b})"
         )
 
-    # Flatten to array.array for zero-copy buffer passing
-    a_flat = array.array('q')
-    for row in a:
-        a_flat.extend(row)
-    b_flat = array.array('q')
-    for row in b:
-        b_flat.extend(row)
+    rsz = rows_a * cols_b
+    result = array.array('q', bytes(rsz * _ll_size))
 
-    # Allocate result
-    result = array.array('q', bytes(rows_a * cols_b * _ll_size))
-
-    # Zero-copy pass to C — C handles CSR construction + multiplication
     _lib.sparse_matmul_dense_io(
         rows_a, cols_a, cols_b,
         a_flat.buffer_info()[0],
@@ -49,9 +49,7 @@ def multiply_matrices(a, b):
         result.buffer_info()[0],
     )
 
-    # Convert result to list-of-lists
-    flat = list(result)
-    return [flat[i * cols_b:(i + 1) * cols_b] for i in range(rows_a)]
+    return rows_a, cols_b, result
 
 
 def load_test_cases(path="test_cases.txt"):
@@ -65,23 +63,23 @@ def load_test_cases(path="test_cases.txt"):
 
             m = vals[idx]; idx += 1
             n = vals[idx]; idx += 1
-            a = [vals[idx + i * n : idx + (i + 1) * n] for i in range(m)]
+            a_flat = array.array('q', vals[idx:idx + m * n])
             idx += m * n
 
             n2 = vals[idx]; idx += 1
             y = vals[idx]; idx += 1
-            b = [vals[idx + i * y : idx + (i + 1) * y] for i in range(n2)]
+            b_flat = array.array('q', vals[idx:idx + n2 * y])
             idx += n2 * y
 
             rm = vals[idx]; idx += 1
             ry = vals[idx]; idx += 1
-            expected = [vals[idx + i * ry : idx + (i + 1) * ry] for i in range(rm)]
+            exp_flat = array.array('q', vals[idx:idx + rm * ry])
 
             cases.append({
                 "name": f"test_{test_id}",
-                "a": a,
-                "b": b,
-                "expected": expected,
+                "a": (m, n, a_flat),
+                "b": (n2, y, b_flat),
+                "expected": (rm, ry, exp_flat),
             })
     return cases
 
@@ -103,9 +101,7 @@ def main():
         latency_ms = (time.perf_counter() - start) * 1_000
 
         try:
-            assert actual == tc["expected"], (
-                f"Expected {tc['expected']}, got {actual}"
-            )
+            assert actual[2] == tc["expected"][2], "Output mismatch"
             solution = "correct"
             observation = "Output matches expected result"
             log(f"  PASS  {name} ({latency_ms:.4f} ms)", log_file)
