@@ -8,34 +8,17 @@ import struct
 # Load C extension
 _dir = os.path.dirname(os.path.abspath(__file__))
 _lib = ctypes.CDLL(os.path.join(_dir, "sparse_matmul.dylib"))
-_lib.sparse_matmul.restype = None
-_lib.sparse_matmul.argtypes = [
-    ctypes.c_int, ctypes.c_int,  # rows_a, cols_b
-    ctypes.c_void_p, ctypes.c_void_p, ctypes.c_void_p,  # A CSR (raw pointers)
-    ctypes.c_void_p, ctypes.c_void_p, ctypes.c_void_p,  # B CSR (raw pointers)
+
+# Dense-IO function: accepts flat dense arrays, does CSR conversion in C
+_lib.sparse_matmul_dense_io.restype = None
+_lib.sparse_matmul_dense_io.argtypes = [
+    ctypes.c_int, ctypes.c_int, ctypes.c_int,  # rows_a, cols_a, cols_b
+    ctypes.c_void_p,  # a_flat
+    ctypes.c_void_p,  # b_flat
     ctypes.c_void_p,  # result
 ]
 
-_int_size = struct.calcsize('i')
 _ll_size = struct.calcsize('q')
-
-
-def _to_csr(matrix):
-    """Convert dense matrix to CSR arrays using array module."""
-    rowptr = array.array('i', [0])
-    colidx = array.array('i')
-    vals = array.array('q')
-    ca = colidx.append
-    va = vals.append
-    nnz = 0
-    for row in matrix:
-        for j, v in enumerate(row):
-            if v:
-                ca(j)
-                va(v)
-                nnz += 1
-        rowptr.append(nnz)
-    return rowptr, colidx, vals
 
 
 def multiply_matrices(a, b):
@@ -47,30 +30,26 @@ def multiply_matrices(a, b):
             f"Incompatible dimensions: ({rows_a}x{cols_a}) and ({rows_b}x{cols_b})"
         )
 
-    # Convert to CSR — array.array gives us buffer protocol for zero-copy
-    a_rp, a_ci, a_v = _to_csr(a)
-    b_rp, b_ci, b_v = _to_csr(b)
+    # Flatten to array.array for zero-copy buffer passing
+    a_flat = array.array('q')
+    for row in a:
+        a_flat.extend(row)
+    b_flat = array.array('q')
+    for row in b:
+        b_flat.extend(row)
 
     # Allocate result
     result = array.array('q', bytes(rows_a * cols_b * _ll_size))
 
-    # Get raw buffer addresses (zero-copy pass to C)
-    a_rp_addr = a_rp.buffer_info()[0]
-    a_ci_addr = a_ci.buffer_info()[0] if a_ci else 0
-    a_v_addr = a_v.buffer_info()[0] if a_v else 0
-    b_rp_addr = b_rp.buffer_info()[0]
-    b_ci_addr = b_ci.buffer_info()[0] if b_ci else 0
-    b_v_addr = b_v.buffer_info()[0] if b_v else 0
-    res_addr = result.buffer_info()[0]
-
-    _lib.sparse_matmul(
-        rows_a, cols_b,
-        a_rp_addr, a_ci_addr, a_v_addr,
-        b_rp_addr, b_ci_addr, b_v_addr,
-        res_addr,
+    # Zero-copy pass to C — C handles CSR construction + multiplication
+    _lib.sparse_matmul_dense_io(
+        rows_a, cols_a, cols_b,
+        a_flat.buffer_info()[0],
+        b_flat.buffer_info()[0],
+        result.buffer_info()[0],
     )
 
-    # Convert result to list-of-lists using struct for speed
+    # Convert result to list-of-lists
     flat = list(result)
     return [flat[i * cols_b:(i + 1) * cols_b] for i in range(rows_a)]
 
