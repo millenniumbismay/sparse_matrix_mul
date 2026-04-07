@@ -3,6 +3,7 @@ import time
 import ctypes
 import os
 import array
+import struct
 
 # Load C extension
 _dir = os.path.dirname(os.path.abspath(__file__))
@@ -10,25 +11,30 @@ _lib = ctypes.CDLL(os.path.join(_dir, "sparse_matmul.dylib"))
 _lib.sparse_matmul.restype = None
 _lib.sparse_matmul.argtypes = [
     ctypes.c_int, ctypes.c_int,  # rows_a, cols_b
-    ctypes.POINTER(ctypes.c_int), ctypes.POINTER(ctypes.c_int), ctypes.POINTER(ctypes.c_longlong),  # A CSR
-    ctypes.POINTER(ctypes.c_int), ctypes.POINTER(ctypes.c_int), ctypes.POINTER(ctypes.c_longlong),  # B CSR
-    ctypes.POINTER(ctypes.c_longlong),  # result
+    ctypes.c_void_p, ctypes.c_void_p, ctypes.c_void_p,  # A CSR (raw pointers)
+    ctypes.c_void_p, ctypes.c_void_p, ctypes.c_void_p,  # B CSR (raw pointers)
+    ctypes.c_void_p,  # result
 ]
 
+_int_size = struct.calcsize('i')
+_ll_size = struct.calcsize('q')
 
-def _to_csr(matrix, rows, cols):
-    """Convert dense matrix to CSR arrays."""
-    rowptr = array.array('i')
+
+def _to_csr(matrix):
+    """Convert dense matrix to CSR arrays using array module."""
+    rowptr = array.array('i', [0])
     colidx = array.array('i')
-    vals = array.array('q')  # signed long long
-    rowptr.append(0)
-    for i in range(rows):
-        row = matrix[i]
-        for j in range(cols):
-            if row[j] != 0:
-                colidx.append(j)
-                vals.append(row[j])
-        rowptr.append(len(colidx))
+    vals = array.array('q')
+    ca = colidx.append
+    va = vals.append
+    nnz = 0
+    for row in matrix:
+        for j, v in enumerate(row):
+            if v:
+                ca(j)
+                va(v)
+                nnz += 1
+        rowptr.append(nnz)
     return rowptr, colidx, vals
 
 
@@ -41,27 +47,32 @@ def multiply_matrices(a, b):
             f"Incompatible dimensions: ({rows_a}x{cols_a}) and ({rows_b}x{cols_b})"
         )
 
-    # Convert to CSR
-    a_rowptr, a_colidx, a_vals = _to_csr(a, rows_a, cols_a)
-    b_rowptr, b_colidx, b_vals = _to_csr(b, rows_b, cols_b)
+    # Convert to CSR — array.array gives us buffer protocol for zero-copy
+    a_rp, a_ci, a_v = _to_csr(a)
+    b_rp, b_ci, b_v = _to_csr(b)
 
     # Allocate result
-    result = (ctypes.c_longlong * (rows_a * cols_b))()
+    result = array.array('q', bytes(rows_a * cols_b * _ll_size))
 
-    # Call C function
+    # Get raw buffer addresses (zero-copy pass to C)
+    a_rp_addr = a_rp.buffer_info()[0]
+    a_ci_addr = a_ci.buffer_info()[0] if a_ci else 0
+    a_v_addr = a_v.buffer_info()[0] if a_v else 0
+    b_rp_addr = b_rp.buffer_info()[0]
+    b_ci_addr = b_ci.buffer_info()[0] if b_ci else 0
+    b_v_addr = b_v.buffer_info()[0] if b_v else 0
+    res_addr = result.buffer_info()[0]
+
     _lib.sparse_matmul(
         rows_a, cols_b,
-        (ctypes.c_int * len(a_rowptr))(*a_rowptr),
-        (ctypes.c_int * len(a_colidx))(*a_colidx) if a_colidx else (ctypes.c_int * 1)(),
-        (ctypes.c_longlong * len(a_vals))(*a_vals) if a_vals else (ctypes.c_longlong * 1)(),
-        (ctypes.c_int * len(b_rowptr))(*b_rowptr),
-        (ctypes.c_int * len(b_colidx))(*b_colidx) if b_colidx else (ctypes.c_int * 1)(),
-        (ctypes.c_longlong * len(b_vals))(*b_vals) if b_vals else (ctypes.c_longlong * 1)(),
-        result,
+        a_rp_addr, a_ci_addr, a_v_addr,
+        b_rp_addr, b_ci_addr, b_v_addr,
+        res_addr,
     )
 
-    # Convert back to list of lists
-    return [list(result[i * cols_b:(i + 1) * cols_b]) for i in range(rows_a)]
+    # Convert result to list-of-lists using struct for speed
+    flat = list(result)
+    return [flat[i * cols_b:(i + 1) * cols_b] for i in range(rows_a)]
 
 
 def load_test_cases(path="test_cases.txt"):
