@@ -17,3 +17,6 @@ This repo aims to optimize the time complexity for Sparse Matrix multiplication 
 | 9 | 1.79 ms | keep | Pre-flatten: true C perf, 5507x |
 | 10 | 2.43 ms | discard | Outer product — worse cache locality |
 | 11 | 1.61 ms | keep | Direct A-scan, 6111x vs baseline |
+| 12 | 4.91 ms | discard | Dense-vectorized (no CSR B) — zeros too costly |
+| 13 | 1.86 ms | discard | K-blocked multiply — repeated A scan overhead |
+| 14 | 1.43 ms | keep | Compact CSR (int16+int8), 6872x vs baseline |

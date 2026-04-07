@@ -107,3 +107,23 @@
 - **Observation**: Eliminating CSR for A is a win. Next: try novel algorithmic approaches to reduce the core multiplication work.
 
 ---
+
+### Experiments 12-13 — K-Blocking + Outer Product Variants (DISCARDED)
+
+- Exp 12: Dense-vectorized row multiply (no CSR for B) — 4.9 ms (discard, zeros waste too many cycles)
+- Exp 13: K-blocked multiplication — 1.86 ms (discard, repeated A scanning offsets cache gains)
+
+---
+
+### Experiment 14 — Single-Pass Compact CSR Multiply (SPCC)
+
+- **Tag**: apr07_0116 — Experiment 14 — pending
+- **Algorithm**: Two innovations: (1) Compact CSR using int16_t for column indices and int8_t for values (3 bytes/entry vs 12 bytes = 4x compression). Exploits domain knowledge that cols < 65536 and values are in [-10, 10]. (2) Single-pass CSR construction: over-allocate to worst-case size and build in one scan of B, eliminating the counting pass.
+- **Time Complexity**: Same O(nnz(A) * avg_nnz_per_row(B)) but with 4x better cache performance in the scatter inner loop.
+- **Pros**: 10% improvement over exp 11. 4x more B entries fit in L1/L2 cache. Single-pass build saves one full scan of B.
+- **Cons**: Assumes values fit in int8 and columns in int16. Over-allocation wastes memory (but doesn't pollute cache since untouched pages aren't loaded).
+- **Result**: 50/50 passed, avg latency 1.4319 ± 0.0435 ms (6872x vs baseline)
+- **Measurement**: 5 runs: [1.44, 1.40, 1.44, 1.39, 1.50] ms. Baseline exp 11: 1.5897 ± 0.0060 ms.
+- **Observation**: Compact representation significantly improves cache utilization. The 4x reduction in B CSR memory footprint directly translates to fewer cache misses in the scatter loop. Packed single-array variant (uint32 with bit-shifting) was tested but slower due to unpacking overhead.
+
+---
