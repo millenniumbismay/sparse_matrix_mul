@@ -8,3 +8,4 @@ This repo aims to optimize the time complexity for Sparse Matrix multiplication 
 |---|---|---|---|
 | 1 (baseline) | 9838.68 ms | keep | Naive O(n^3) triple-loop |
 | 2 | 143.00 ms | keep | Sparse DOK — skip zeros, 68.8x speedup |
+| 3 | 120.29 ms | keep | Fully sparse A+B, local var caching |

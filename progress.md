@@ -26,3 +26,15 @@
 - **Observation**: Massive improvement. Next steps: also sparsify A's representation, try Gustavson's algorithm with dense accumulator, or explore C-level acceleration via ctypes.
 
 ---
+
+### Experiment 3 — Fully Sparse A+B with Local Var Caching
+
+- **Tag**: apr07_0116 — Experiment 3 — aae3799
+- **Algorithm**: Pre-extract non-zeros from both A and B as list-of-tuples per row. Cache result_row as local variable. Only iterate non-zero pairs.
+- **Time Complexity**: O(nnz(A) * avg_nnz_per_row(B)) average. Same worst case O(m*n*p).
+- **Pros**: 16% improvement over exp 2. Eliminates scanning zero positions in A. Local var caching reduces dict lookups.
+- **Cons**: List comprehension for sparse extraction still touches all elements once during setup.
+- **Result**: 50/50 passed, avg latency 120.29 ms
+- **Observation**: Incremental gain from avoiding zero-checks in A. Next: try C extension via ctypes or algorithmic changes like blocking.
+
+---
