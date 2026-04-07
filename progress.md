@@ -38,3 +38,24 @@
 - **Observation**: Incremental gain from avoiding zero-checks in A. Next: try C extension via ctypes or algorithmic changes like blocking.
 
 ---
+
+### Experiment 4 — C Extension via ctypes (CSR Sparse Matmul)
+
+- **Tag**: apr07_0116 — Experiment 4 — b84133c
+- **Algorithm**: Same sparse CSR algorithm but implemented in C. Python converts dense matrices to CSR format, passes to C function via ctypes.
+- **Time Complexity**: O(nnz(A) * avg_nnz_per_row(B)) with ~100x lower constant factor.
+- **Pros**: 324x speedup over baseline. 4x over pure Python sparse.
+- **Cons**: Python-to-C marshaling overhead. Platform-specific binary.
+- **Result**: 50/50 passed, avg latency 30.34 ms
+- **Observation**: Bottleneck now in Python-side CSR construction and result conversion.
+
+---
+
+### Experiment 5 — Dense-Input C Extension (DISCARDED)
+
+- **Tag**: apr07_0116 — Experiment 5 — 62f8179
+- **Algorithm**: Pass flat dense arrays to C, build CSR in C. Intended to eliminate Python CSR overhead.
+- **Result**: 50/50 passed, avg latency 35.55 ms (WORSE than exp 4)
+- **Observation**: Moving ALL elements through Python-C boundary is slower than only marshaling non-zeros. Reverted to exp 4.
+
+---
