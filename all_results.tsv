@@ -5,3 +5,4 @@ apr07_0116	3	aae3799	50/50	120.2903 ms	keep	fully sparse A+B list rows, local va
 apr07_0116	4	b84133c	50/50	30.3438 ms	keep	C extension via ctypes: CSR sparse matmul in C — 324x vs baseline, 4x vs exp3
 apr07_0116	5	62f8179	50/50	35.5485 ms	discard	dense-input C: moving all elements (incl zeros) through Python-C boundary slower than CSR-only marshaling
 apr07_0116	6	f29e735	50/50	20.0213 ms	keep	zero-copy buffer passing + optimized CSR build — 34% improvement over exp4
+apr07_0116	11	90bc6d5	50/50	1.6097 ms	keep	direct A-scan (no CSR for A) + CSR B only — 10% improvement, simpler code
