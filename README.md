@@ -7,3 +7,4 @@ This repo aims to optimize the time complexity for Sparse Matrix multiplication 
 | Experiment | Latency | Status | Observation |
 |---|---|---|---|
 | 1 (baseline) | 9838.68 ms | keep | Naive O(n^3) triple-loop |
+| 2 | 143.00 ms | keep | Sparse DOK — skip zeros, 68.8x speedup |

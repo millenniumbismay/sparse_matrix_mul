@@ -1,2 +1,3 @@
 branch_tag	experiment_id	commit_hash	solutions_passed	average_latency	status	observation
 apr07_0116	1	f932bf5	50/50	9838.6802 ms	keep	baseline: naive O(n^3) triple-loop matrix multiplication
+apr07_0116	2	245fc5c	50/50	143.0042 ms	keep	sparse DOK: row-indexed B, skip zeros in both A and B — 68.8x speedup
