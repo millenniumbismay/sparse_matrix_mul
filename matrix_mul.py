@@ -1,5 +1,35 @@
 import csv
 import time
+import ctypes
+import os
+import array
+
+# Load C extension
+_dir = os.path.dirname(os.path.abspath(__file__))
+_lib = ctypes.CDLL(os.path.join(_dir, "sparse_matmul.dylib"))
+_lib.sparse_matmul.restype = None
+_lib.sparse_matmul.argtypes = [
+    ctypes.c_int, ctypes.c_int,  # rows_a, cols_b
+    ctypes.POINTER(ctypes.c_int), ctypes.POINTER(ctypes.c_int), ctypes.POINTER(ctypes.c_longlong),  # A CSR
+    ctypes.POINTER(ctypes.c_int), ctypes.POINTER(ctypes.c_int), ctypes.POINTER(ctypes.c_longlong),  # B CSR
+    ctypes.POINTER(ctypes.c_longlong),  # result
+]
+
+
+def _to_csr(matrix, rows, cols):
+    """Convert dense matrix to CSR arrays."""
+    rowptr = array.array('i')
+    colidx = array.array('i')
+    vals = array.array('q')  # signed long long
+    rowptr.append(0)
+    for i in range(rows):
+        row = matrix[i]
+        for j in range(cols):
+            if row[j] != 0:
+                colidx.append(j)
+                vals.append(row[j])
+        rowptr.append(len(colidx))
+    return rowptr, colidx, vals
 
 
 def multiply_matrices(a, b):
@@ -11,25 +41,27 @@ def multiply_matrices(a, b):
             f"Incompatible dimensions: ({rows_a}x{cols_a}) and ({rows_b}x{cols_b})"
         )
 
-    # Build sparse row representations for both matrices
-    a_rows = [[(k, v) for k, v in enumerate(row) if v] for row in a]
-    b_rows = [[(j, v) for j, v in enumerate(row) if v] for row in b]
+    # Convert to CSR
+    a_rowptr, a_colidx, a_vals = _to_csr(a, rows_a, cols_a)
+    b_rowptr, b_colidx, b_vals = _to_csr(b, rows_b, cols_b)
 
-    # Multiply: only iterate over non-zero pairs
-    result = [[0] * cols_b for _ in range(rows_a)]
-    for i in range(rows_a):
-        a_row = a_rows[i]
-        if not a_row:
-            continue
-        result_row = result[i]
-        for k, a_val in a_row:
-            b_row = b_rows[k]
-            if not b_row:
-                continue
-            for j, b_val in b_row:
-                result_row[j] += a_val * b_val
+    # Allocate result
+    result = (ctypes.c_longlong * (rows_a * cols_b))()
 
-    return result
+    # Call C function
+    _lib.sparse_matmul(
+        rows_a, cols_b,
+        (ctypes.c_int * len(a_rowptr))(*a_rowptr),
+        (ctypes.c_int * len(a_colidx))(*a_colidx) if a_colidx else (ctypes.c_int * 1)(),
+        (ctypes.c_longlong * len(a_vals))(*a_vals) if a_vals else (ctypes.c_longlong * 1)(),
+        (ctypes.c_int * len(b_rowptr))(*b_rowptr),
+        (ctypes.c_int * len(b_colidx))(*b_colidx) if b_colidx else (ctypes.c_int * 1)(),
+        (ctypes.c_longlong * len(b_vals))(*b_vals) if b_vals else (ctypes.c_longlong * 1)(),
+        result,
+    )
+
+    # Convert back to list of lists
+    return [list(result[i * cols_b:(i + 1) * cols_b]) for i in range(rows_a)]
 
 
 def load_test_cases(path="test_cases.txt"):
