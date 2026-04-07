@@ -11,3 +11,4 @@ This repo aims to optimize the time complexity for Sparse Matrix multiplication 
 | 3 | 120.29 ms | keep | Fully sparse A+B, local var caching |
 | 4 | 30.34 ms | keep | C extension via ctypes, 324x vs baseline |
 | 5 | 35.55 ms | discard | Dense-input C — worse than CSR marshaling |
+| 6 | 20.02 ms | keep | Zero-copy buffer, 490x vs baseline |

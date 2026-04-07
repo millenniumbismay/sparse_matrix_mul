@@ -4,3 +4,4 @@ apr07_0116	2	245fc5c	50/50	143.0042 ms	keep	sparse DOK: row-indexed B, skip zero
 apr07_0116	3	aae3799	50/50	120.2903 ms	keep	fully sparse A+B list rows, local var caching — 16% improvement
 apr07_0116	4	b84133c	50/50	30.3438 ms	keep	C extension via ctypes: CSR sparse matmul in C — 324x vs baseline, 4x vs exp3
 apr07_0116	5	62f8179	50/50	35.5485 ms	discard	dense-input C: moving all elements (incl zeros) through Python-C boundary slower than CSR-only marshaling
+apr07_0116	6	f29e735	50/50	20.0213 ms	keep	zero-copy buffer passing + optimized CSR build — 34% improvement over exp4

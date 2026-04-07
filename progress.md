@@ -59,3 +59,14 @@
 - **Observation**: Moving ALL elements through Python-C boundary is slower than only marshaling non-zeros. Reverted to exp 4.
 
 ---
+
+### Experiment 6 — Zero-Copy Buffer Passing + Optimized CSR
+
+- **Tag**: apr07_0116 — Experiment 6 — f29e735
+- **Algorithm**: Use array.array buffer_info() for zero-copy pointer passing to C. Optimized CSR build with cached append methods.
+- **Time Complexity**: Same O(nnz(A) * avg_nnz_per_row(B)), lower constant from zero-copy.
+- **Pros**: 34% improvement over exp 4. Eliminates ctypes array creation overhead.
+- **Result**: 50/50 passed, avg latency 20.02 ms
+- **Observation**: ~490x vs baseline. Next: focus on algorithmic improvements rather than systems optimizations.
+
+---
