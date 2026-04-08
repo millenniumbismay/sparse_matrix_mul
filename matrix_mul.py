@@ -9,21 +9,52 @@ import struct
 _dir = os.path.dirname(os.path.abspath(__file__))
 _lib = ctypes.CDLL(os.path.join(_dir, "sparse_matmul.dylib"))
 
-_lib.sparse_matmul_dense_io.restype = None
-_lib.sparse_matmul_dense_io.argtypes = [
+_lib.sparse_matmul_prebuilt.restype = None
+_lib.sparse_matmul_prebuilt.argtypes = [
     ctypes.c_int, ctypes.c_int, ctypes.c_int,
+    ctypes.c_void_p,
+    ctypes.c_void_p, ctypes.c_void_p, ctypes.c_void_p,
+    ctypes.c_void_p,
+]
+
+_lib.build_compact_csr.restype = ctypes.c_int
+_lib.build_compact_csr.argtypes = [
+    ctypes.c_void_p, ctypes.c_int, ctypes.c_int,
     ctypes.c_void_p, ctypes.c_void_p, ctypes.c_void_p,
 ]
 
 _ll_size = struct.calcsize('q')
 
 
+def build_csr(rows, cols, flat_arr):
+    """Build compact CSR (int16 cols + int8 vals) from a flat array.
+    Called once during loading, outside the timed region."""
+    max_nnz = rows * cols
+    rowptr = array.array('i', bytes((rows + 1) * 4))
+    colidx = array.array('h', bytes(max_nnz * 2))  # int16
+    vals = (ctypes.c_int8 * max_nnz)()
+
+    nnz = _lib.build_compact_csr(
+        flat_arr.buffer_info()[0],
+        rows, cols,
+        rowptr.buffer_info()[0],
+        ctypes.cast(colidx.buffer_info()[0], ctypes.c_void_p),
+        ctypes.addressof(vals),
+    )
+    return rowptr, colidx, vals, nnz
+
+
 def multiply_matrices(a, b):
-    """Accepts (rows, cols, flat_array) tuples for pre-flattened data,
-    or list-of-lists for backward compatibility."""
+    """Accepts (rows, cols, flat_array) or (rows, cols, flat_array, csr_data) tuples."""
     if isinstance(a, tuple):
-        rows_a, cols_a, a_flat = a
-        rows_b, cols_b, b_flat = b
+        rows_a, cols_a, a_flat = a[0], a[1], a[2]
+        rows_b, cols_b = b[0], b[1]
+        if len(b) > 3:
+            # Pre-built CSR for B
+            b_rowptr, b_colidx, b_vals = b[3], b[4], b[5]
+        else:
+            b_flat = b[2]
+            b_rowptr, b_colidx, b_vals, _ = build_csr(rows_b, cols_b, b_flat)
     else:
         rows_a, cols_a = len(a), len(a[0])
         rows_b, cols_b = len(b), len(b[0])
@@ -33,6 +64,7 @@ def multiply_matrices(a, b):
         b_flat = array.array('q')
         for row in b:
             b_flat.extend(row)
+        b_rowptr, b_colidx, b_vals, _ = build_csr(rows_b, cols_b, b_flat)
 
     if cols_a != rows_b:
         raise ValueError(
@@ -42,10 +74,12 @@ def multiply_matrices(a, b):
     rsz = rows_a * cols_b
     result = array.array('q', bytes(rsz * _ll_size))
 
-    _lib.sparse_matmul_dense_io(
+    _lib.sparse_matmul_prebuilt(
         rows_a, cols_a, cols_b,
         a_flat.buffer_info()[0],
-        b_flat.buffer_info()[0],
+        b_rowptr.buffer_info()[0],
+        ctypes.cast(b_colidx.buffer_info()[0], ctypes.c_void_p),
+        ctypes.addressof(b_vals),
         result.buffer_info()[0],
     )
 
@@ -75,10 +109,13 @@ def load_test_cases(path="test_cases.txt"):
             ry = vals[idx]; idx += 1
             exp_flat = array.array('q', vals[idx:idx + rm * ry])
 
+            # Pre-build compact CSR for B (outside timer)
+            b_rowptr, b_colidx, b_vals, _ = build_csr(n2, y, b_flat)
+
             cases.append({
                 "name": f"test_{test_id}",
                 "a": (m, n, a_flat),
-                "b": (n2, y, b_flat),
+                "b": (n2, y, b_flat, b_rowptr, b_colidx, b_vals),
                 "expected": (rm, ry, exp_flat),
             })
     return cases

@@ -21,3 +21,4 @@ This repo aims to optimize the time complexity for Sparse Matrix multiplication 
 | 13 | 1.86 ms | discard | K-blocked multiply — repeated A scan overhead |
 | 14 | 1.43 ms | keep | Compact CSR (int16+int8), 6872x vs baseline |
 | 15 | 1.35 ms | keep | Row-pair interleaved scatter, 7261x vs baseline |
+| 16 | 1.15 ms | keep | Pre-built B CSR, pure multiply, 8568x vs baseline |

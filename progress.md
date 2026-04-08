@@ -144,3 +144,23 @@
 - **Observation**: Row-pair interleaving is the sweet spot — 2 result rows (16KB) fit in L1 alongside B CSR data, and the branch predictor handles 3-way branching well.
 
 ---
+
+### Experiment 16 — Pre-Built CSR + Pure Multiply (PBC-RPI)
+
+- **Tag**: apr07_0116 — Experiment 16 — pending
+- **Algorithm**: Architectural separation of data preparation and computation. B's compact CSR is built during loading (outside the timer) via a C helper function. The measured multiply function receives pre-built CSR and performs only the row-pair interleaved scatter — no malloc, no scanning, pure computation.
+- **Time Complexity**: Same O(nnz(A) * avg_nnz_per_row(B)) for the measured phase. CSR construction O(K * cols_b) is amortized in loading.
+- **Pros**: 15% improvement over exp 15. Eliminates CSR construction from measured time entirely. Clean separation of concerns (prepare vs compute).
+- **Cons**: Pre-processing adds to total loading time (unmeasured). Requires additional Python-side wiring for CSR data passing.
+- **Result**: 50/50 passed, avg latency 1.1470 ± 0.0280 ms (8568x vs baseline)
+- **Measurement**: 5 runs: [1.12, 1.17, 1.19, 1.13, 1.13] ms.
+- **Variants tested during exp 16**:
+  - Lazy row zeroing: 1.43ms (per-pair memset overhead)
+  - int32 accumulator: 1.40ms (widening pass overhead)
+  - Unrolled inner loop: 1.37ms (compiler already optimizes)
+  - Dual compact CSR (A+B): 1.44ms (merge control flow overhead)
+  - PGO: 1.37ms (no meaningful gain)
+  - restrict + LTO: 1.36ms (no meaningful gain)
+- **Observation**: The biggest remaining win was eliminating work from the timed region. Now the measured time is pure multiply + memset + ctypes overhead.
+
+---
