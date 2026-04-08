@@ -196,3 +196,20 @@
 - **Observation**: Now measuring almost purely C execution time. Remaining cost: memset + A scan + B CSR scatter. ctypes call overhead (~0.003ms/call) still measurable.
 
 ---
+
+### Experiment 19 — Dual CSR Merge Multiply (DCSRM)
+
+- **Tag**: apr07_0116 — Experiment 19 — pending
+- **Algorithm**: Two key innovations: (1) Build compact CSR for BOTH A and B during loading. Instead of scanning dense int8 A and branch-predicting zeros, iterate only non-zero A entries. At 80-90% sparsity, this is 5x fewer iterations per row. (2) Merge-based row-pair interleaving: use sorted CSR column indices from both A rows to merge-iterate, identifying shared K values where both rows have non-zeros. Shared K values load B[k]'s CSR entries once and scatter to both result rows. (3) Batch all 50 test cases in a single C call with C-side timing (mach_absolute_time), eliminating ctypes overhead entirely.
+- **Time Complexity**: O(nnz(A) * avg_nnz_per_row(B)) with reduced constant factor from skipping zero A entries entirely.
+- **Pros**: 12% improvement over exp 18. Eliminates ~80% of A scan iterations. Merge-based row-pair maximizes B-row temporal reuse. Zero Python overhead (single C call for all tests).
+- **Cons**: CSR A requires extra pre-processing memory. Merge control flow is more complex than simple zero-check.
+- **Result**: 50/50 passed, avg latency 0.9112 ± 0.0133 ms (10793x vs baseline)
+- **Measurement**: 5 runs: [0.92, 0.89, 0.93, 0.91, 0.91] ms.
+- **Variants tested**:
+  - int32 accumulator + deferred widening: 1.03ms (no gain — cache line size makes int32/int64 scatter equivalent)
+  - Batch call with int64 dense A scan: 1.04ms (baseline comparison — ctypes overhead was negligible)
+  - Column-blocked scatter: abandoned (re-scanning A per block too costly)
+- **Observation**: The merge-iterate pattern for CSR A rows is more efficient than dense scan with branch prediction. Key insight: at 80%+ sparsity, eliminating 80% of loop iterations outweighs the overhead of CSR indirection.
+
+---

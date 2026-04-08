@@ -11,3 +11,4 @@ apr07_0116	15	e691238	50/50	1.3549 ms	keep	row-pair interleaved scatter + compac
 apr07_0116	16	734e1f4	50/50	1.1470 ms	keep	pre-built B CSR during loading — pure multiply only in timer, 15% faster
 apr07_0116	17	86c5e43	50/50	1.0785 ms	keep	int8 A + pre-built B CSR + no memset — 8x less A bandwidth, 6% faster
 apr07_0116	18	pending	50/50	1.0287 ms	keep	pre-alloc result + direct C call — eliminate Python array creation, 5% faster
+apr07_0116	19	pending	50/50	0.9112 ms	keep	dual CSR merge multiply + batch C call — skip zero A entries, merge row-pairs, 12% faster

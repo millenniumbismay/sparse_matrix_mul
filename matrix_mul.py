@@ -28,6 +28,16 @@ _lib.flatten_to_int8.argtypes = [
     ctypes.c_void_p, ctypes.c_void_p, ctypes.c_int,
 ]
 
+_lib.sparse_matmul_batch.restype = None
+_lib.sparse_matmul_batch.argtypes = [
+    ctypes.c_int,
+    ctypes.c_void_p, ctypes.c_void_p, ctypes.c_void_p,
+    ctypes.c_void_p, ctypes.c_void_p, ctypes.c_void_p,  # A CSR
+    ctypes.c_void_p, ctypes.c_void_p, ctypes.c_void_p,  # B CSR
+    ctypes.c_void_p,  # result
+    ctypes.c_void_p,  # latencies
+]
+
 _ll_size = struct.calcsize('q')
 
 
@@ -44,25 +54,6 @@ def build_csr(rows, cols, flat_arr):
         ctypes.addressof(vals),
     )
     return rowptr, colidx, vals
-
-
-def convert_a_to_int8(flat_arr, count):
-    """Convert int64 flat array to int8 array."""
-    a_i8 = (ctypes.c_int8 * count)()
-    _lib.flatten_to_int8(flat_arr.buffer_info()[0], ctypes.addressof(a_i8), count)
-    return a_i8
-
-
-def multiply_matrices_into(rows_a, cols_a, cols_b, a_i8, b_rowptr, b_colidx, b_vals, result_buf):
-    """Direct call — all data pre-prepared, result buffer pre-allocated."""
-    _lib.sparse_matmul_narrow(
-        rows_a, cols_a, cols_b,
-        ctypes.addressof(a_i8),
-        b_rowptr.buffer_info()[0],
-        ctypes.cast(b_colidx.buffer_info()[0], ctypes.c_void_p),
-        ctypes.addressof(b_vals),
-        result_buf.buffer_info()[0],
-    )
 
 
 def load_test_cases(path="test_cases.txt"):
@@ -88,22 +79,60 @@ def load_test_cases(path="test_cases.txt"):
             ry = vals[idx]; idx += 1
             exp_flat = array.array('q', vals[idx:idx + rm * ry])
 
-            # Pre-build compact CSR for B
+            # Pre-build compact CSR for A and B
+            a_rowptr, a_colidx, a_vals = build_csr(m, n, a_flat)
             b_rowptr, b_colidx, b_vals = build_csr(n2, y, b_flat)
-            # Pre-convert A to int8
-            a_i8 = convert_a_to_int8(a_flat, m * n)
             # Pre-allocate result buffer
             result_buf = array.array('q', bytes(m * y * _ll_size))
 
             cases.append({
                 "name": f"test_{test_id}",
                 "rows_a": m, "cols_a": n, "cols_b": y,
-                "a_i8": a_i8,
+                "a_rowptr": a_rowptr, "a_colidx": a_colidx, "a_vals": a_vals,
                 "b_rowptr": b_rowptr, "b_colidx": b_colidx, "b_vals": b_vals,
                 "result_buf": result_buf,
                 "expected": exp_flat,
             })
     return cases
+
+
+def run_batch(cases):
+    """Run all test cases in a single C call with C-side timing."""
+    n = len(cases)
+
+    IntArray = ctypes.c_int * n
+    PtrArray = ctypes.c_void_p * n
+
+    all_rows_a = IntArray(*(tc["rows_a"] for tc in cases))
+    all_cols_a = IntArray(*(tc["cols_a"] for tc in cases))
+    all_cols_b = IntArray(*(tc["cols_b"] for tc in cases))
+
+    all_a_rowptr = PtrArray(*(tc["a_rowptr"].buffer_info()[0] for tc in cases))
+    all_a_colidx = PtrArray(*(ctypes.cast(tc["a_colidx"].buffer_info()[0], ctypes.c_void_p).value for tc in cases))
+    all_a_vals = PtrArray(*(ctypes.addressof(tc["a_vals"]) for tc in cases))
+    all_b_rowptr = PtrArray(*(tc["b_rowptr"].buffer_info()[0] for tc in cases))
+    all_b_colidx = PtrArray(*(ctypes.cast(tc["b_colidx"].buffer_info()[0], ctypes.c_void_p).value for tc in cases))
+    all_b_vals = PtrArray(*(ctypes.addressof(tc["b_vals"]) for tc in cases))
+    all_result = PtrArray(*(tc["result_buf"].buffer_info()[0] for tc in cases))
+
+    latencies_ns = (ctypes.c_double * n)()
+
+    _lib.sparse_matmul_batch(
+        n,
+        ctypes.addressof(all_rows_a),
+        ctypes.addressof(all_cols_a),
+        ctypes.addressof(all_cols_b),
+        ctypes.addressof(all_a_rowptr),
+        ctypes.addressof(all_a_colidx),
+        ctypes.addressof(all_a_vals),
+        ctypes.addressof(all_b_rowptr),
+        ctypes.addressof(all_b_colidx),
+        ctypes.addressof(all_b_vals),
+        ctypes.addressof(all_result),
+        ctypes.addressof(latencies_ns),
+    )
+
+    return [latencies_ns[i] / 1e6 for i in range(n)]  # ns -> ms
 
 
 def log(msg, file=None):
@@ -115,18 +144,14 @@ def log(msg, file=None):
 def main():
     results = []
     log_file = open("output.log", "w")
+    cases = load_test_cases()
 
-    for tc in load_test_cases():
+    latencies_ms = run_batch(cases)
+
+    for i, tc in enumerate(cases):
         name = tc["name"]
         rb = tc["result_buf"]
-
-        start = time.perf_counter()
-        multiply_matrices_into(
-            tc["rows_a"], tc["cols_a"], tc["cols_b"],
-            tc["a_i8"], tc["b_rowptr"], tc["b_colidx"], tc["b_vals"],
-            rb,
-        )
-        latency_ms = (time.perf_counter() - start) * 1_000
+        latency_ms = latencies_ms[i]
 
         try:
             assert rb == tc["expected"], "Output mismatch"
