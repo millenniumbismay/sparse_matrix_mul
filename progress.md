@@ -127,3 +127,20 @@
 - **Observation**: Compact representation significantly improves cache utilization. The 4x reduction in B CSR memory footprint directly translates to fewer cache misses in the scatter loop. Packed single-array variant (uint32 with bit-shifting) was tested but slower due to unpacking overhead.
 
 ---
+
+### Experiment 15 — Row-Pair Interleaved Compact CSR (RPIC)
+
+- **Tag**: apr07_0116 — Experiment 15 — pending
+- **Algorithm**: Process 2 A rows simultaneously. When both A[i1][k] and A[i2][k] are non-zero, B[k]'s CSR entries are loaded once and scattered to both result rows ("B-row temporal reuse"). Three specialized inner loops (both/first-only/second-only) avoid branches in the hot path while eliminating wasted multiply-adds for zero a_vals. Combined with compact CSR (int16+int8).
+- **Time Complexity**: Same O(nnz(A) * avg_nnz_per_row(B)) with reduced B CSR cache misses from shared loads.
+- **Pros**: 5% improvement over exp 14. Novel "B-row temporal reuse" technique.
+- **Cons**: Code complexity (3 inner loop variants). Marginal benefit for very sparse matrices where row pairs rarely share non-zero columns.
+- **Result**: 50/50 passed, avg latency 1.3549 ± 0.0146 ms (7261x vs baseline)
+- **Measurement**: 5 runs: [1.38, 1.34, 1.34, 1.36, 1.36] ms.
+- **Variants tested**:
+  - Quad-row (4 rows): 1.68ms — too many branches in inner loop
+  - Branchless 2-row: 1.52ms — wasted multiply-adds on zero a_vals
+  - Two-pass exact alloc: 1.39ms — slightly slower than single-pass over-alloc
+- **Observation**: Row-pair interleaving is the sweet spot — 2 result rows (16KB) fit in L1 alongside B CSR data, and the branch predictor handles 3-way branching well.
+
+---
