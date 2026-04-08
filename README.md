@@ -26,3 +26,4 @@ This repo aims to optimize the time complexity for Sparse Matrix multiplication 
 | 18 | 1.03 ms | keep | Pre-alloc result + direct call, 9561x vs baseline |
 | 19 | 0.91 ms | keep | Dual CSR merge multiply + batch C call, 10793x vs baseline |
 | 20 | 0.22 ms | keep | Parallel GCD merge-iterate (6 threads), 44540x vs baseline |
+| 21 | 0.91 ms | keep | Per-pair lazy zeroing (serial), 10791x vs baseline |

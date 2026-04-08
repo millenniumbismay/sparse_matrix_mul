@@ -20,6 +20,43 @@ _lib.build_compact_csr.argtypes = [
     ctypes.c_void_p, ctypes.c_void_p, ctypes.c_void_p,
 ]
 
+_lib.build_compact_csc.restype = ctypes.c_int
+_lib.build_compact_csc.argtypes = [
+    ctypes.c_void_p, ctypes.c_int, ctypes.c_int,
+    ctypes.c_void_p, ctypes.c_void_p, ctypes.c_void_p,
+]
+
+_lib.sparse_matmul_batch_outer.restype = None
+_lib.sparse_matmul_batch_outer.argtypes = [
+    ctypes.c_int,
+    ctypes.c_void_p, ctypes.c_void_p, ctypes.c_void_p,
+    ctypes.c_void_p, ctypes.c_void_p, ctypes.c_void_p,
+    ctypes.c_void_p, ctypes.c_void_p, ctypes.c_void_p,
+    ctypes.c_void_p,
+    ctypes.c_void_p,
+]
+
+_lib.sparse_matmul_batch_nomerge.restype = None
+_lib.sparse_matmul_batch_nomerge.argtypes = [
+    ctypes.c_int,
+    ctypes.c_void_p, ctypes.c_void_p, ctypes.c_void_p,
+    ctypes.c_void_p, ctypes.c_void_p, ctypes.c_void_p,
+    ctypes.c_void_p, ctypes.c_void_p, ctypes.c_void_p,
+    ctypes.c_void_p,
+    ctypes.c_void_p,
+]
+
+_lib.sparse_matmul_batch_rowblock.restype = None
+_lib.sparse_matmul_batch_rowblock.argtypes = [
+    ctypes.c_int,
+    ctypes.c_void_p, ctypes.c_void_p, ctypes.c_void_p,
+    ctypes.c_void_p, ctypes.c_void_p, ctypes.c_void_p,
+    ctypes.c_void_p, ctypes.c_void_p, ctypes.c_void_p,
+    ctypes.c_void_p,
+    ctypes.c_void_p,
+    ctypes.c_int,
+]
+
 _lib.sparse_matmul_batch.restype = None
 _lib.sparse_matmul_batch.argtypes = [
     ctypes.c_int,
@@ -71,6 +108,21 @@ def build_csr(rows, cols, flat_arr):
     return rowptr, colidx, vals
 
 
+def build_csc(rows, cols, flat_arr):
+    """Build compact CSC (int16 rows + int8 vals) from a flat array."""
+    max_nnz = rows * cols
+    colptr = array.array('i', bytes((cols + 1) * 4))
+    rowidx = array.array('h', bytes(max_nnz * 2))
+    vals = (ctypes.c_int8 * max_nnz)()
+    _lib.build_compact_csc(
+        flat_arr.buffer_info()[0], rows, cols,
+        colptr.buffer_info()[0],
+        ctypes.cast(rowidx.buffer_info()[0], ctypes.c_void_p),
+        ctypes.addressof(vals),
+    )
+    return colptr, rowidx, vals
+
+
 def load_test_cases(path="test_cases.txt"):
     cases = []
     with open(path) as f:
@@ -97,6 +149,8 @@ def load_test_cases(path="test_cases.txt"):
             # Pre-build compact CSR for A and B
             a_rowptr, a_colidx, a_vals = build_csr(m, n, a_flat)
             b_rowptr, b_colidx, b_vals = build_csr(n2, y, b_flat)
+            # Pre-build CSC for A (for outer product formulation)
+            a_colptr, a_rowidx, a_vals_csc = build_csc(m, n, a_flat)
             # Pre-compute dense int8 arrays for BLAS path
             a_i8 = (ctypes.c_int8 * (m * n))()
             _lib.flatten_to_int8(a_flat.buffer_info()[0], ctypes.addressof(a_i8), m * n)
@@ -110,6 +164,7 @@ def load_test_cases(path="test_cases.txt"):
                 "rows_a": m, "cols_a": n, "cols_b": y,
                 "a_i8": a_i8, "b_i8": b_i8,
                 "a_rowptr": a_rowptr, "a_colidx": a_colidx, "a_vals": a_vals,
+                "a_colptr": a_colptr, "a_rowidx": a_rowidx, "a_vals_csc": a_vals_csc,
                 "b_rowptr": b_rowptr, "b_colidx": b_colidx, "b_vals": b_vals,
                 "result_buf": result_buf,
                 "expected": exp_flat,
@@ -117,7 +172,7 @@ def load_test_cases(path="test_cases.txt"):
     return cases
 
 
-def run_batch(cases):
+def run_batch(cases, method="serial"):
     """Run all test cases in a single C call with C-side timing."""
     n = len(cases)
 
@@ -128,9 +183,6 @@ def run_batch(cases):
     all_cols_a = IntArray(*(tc["cols_a"] for tc in cases))
     all_cols_b = IntArray(*(tc["cols_b"] for tc in cases))
 
-    all_a_rowptr = PtrArray(*(tc["a_rowptr"].buffer_info()[0] for tc in cases))
-    all_a_colidx = PtrArray(*(ctypes.cast(tc["a_colidx"].buffer_info()[0], ctypes.c_void_p).value for tc in cases))
-    all_a_vals = PtrArray(*(ctypes.addressof(tc["a_vals"]) for tc in cases))
     all_b_rowptr = PtrArray(*(tc["b_rowptr"].buffer_info()[0] for tc in cases))
     all_b_colidx = PtrArray(*(ctypes.cast(tc["b_colidx"].buffer_info()[0], ctypes.c_void_p).value for tc in cases))
     all_b_vals = PtrArray(*(ctypes.addressof(tc["b_vals"]) for tc in cases))
@@ -138,24 +190,104 @@ def run_batch(cases):
 
     latencies_ns = (ctypes.c_double * n)()
 
-    all_a_i8 = PtrArray(*(ctypes.addressof(tc["a_i8"]) for tc in cases))
-    all_b_i8 = PtrArray(*(ctypes.addressof(tc["b_i8"]) for tc in cases))
+    if method == "outer":
+        all_a_colptr = PtrArray(*(tc["a_colptr"].buffer_info()[0] for tc in cases))
+        all_a_rowidx = PtrArray(*(ctypes.cast(tc["a_rowidx"].buffer_info()[0], ctypes.c_void_p).value for tc in cases))
+        all_a_vals_csc = PtrArray(*(ctypes.addressof(tc["a_vals_csc"]) for tc in cases))
 
-    _lib.sparse_matmul_batch_parallel(
-        n,
-        ctypes.addressof(all_rows_a),
-        ctypes.addressof(all_cols_a),
-        ctypes.addressof(all_cols_b),
-        ctypes.addressof(all_a_rowptr),
-        ctypes.addressof(all_a_colidx),
-        ctypes.addressof(all_a_vals),
-        ctypes.addressof(all_b_rowptr),
-        ctypes.addressof(all_b_colidx),
-        ctypes.addressof(all_b_vals),
-        ctypes.addressof(all_result),
-        ctypes.addressof(latencies_ns),
-        6,  # num_threads
-    )
+        _lib.sparse_matmul_batch_outer(
+            n,
+            ctypes.addressof(all_rows_a),
+            ctypes.addressof(all_cols_a),
+            ctypes.addressof(all_cols_b),
+            ctypes.addressof(all_a_colptr),
+            ctypes.addressof(all_a_rowidx),
+            ctypes.addressof(all_a_vals_csc),
+            ctypes.addressof(all_b_rowptr),
+            ctypes.addressof(all_b_colidx),
+            ctypes.addressof(all_b_vals),
+            ctypes.addressof(all_result),
+            ctypes.addressof(latencies_ns),
+        )
+    elif method == "nomerge":
+        all_a_rowptr = PtrArray(*(tc["a_rowptr"].buffer_info()[0] for tc in cases))
+        all_a_colidx = PtrArray(*(ctypes.cast(tc["a_colidx"].buffer_info()[0], ctypes.c_void_p).value for tc in cases))
+        all_a_vals = PtrArray(*(ctypes.addressof(tc["a_vals"]) for tc in cases))
+
+        _lib.sparse_matmul_batch_nomerge(
+            n,
+            ctypes.addressof(all_rows_a),
+            ctypes.addressof(all_cols_a),
+            ctypes.addressof(all_cols_b),
+            ctypes.addressof(all_a_rowptr),
+            ctypes.addressof(all_a_colidx),
+            ctypes.addressof(all_a_vals),
+            ctypes.addressof(all_b_rowptr),
+            ctypes.addressof(all_b_colidx),
+            ctypes.addressof(all_b_vals),
+            ctypes.addressof(all_result),
+            ctypes.addressof(latencies_ns),
+        )
+    elif method.startswith("block"):
+        block_size = int(method.replace("block", ""))
+        all_a_rowptr = PtrArray(*(tc["a_rowptr"].buffer_info()[0] for tc in cases))
+        all_a_colidx = PtrArray(*(ctypes.cast(tc["a_colidx"].buffer_info()[0], ctypes.c_void_p).value for tc in cases))
+        all_a_vals = PtrArray(*(ctypes.addressof(tc["a_vals"]) for tc in cases))
+
+        _lib.sparse_matmul_batch_rowblock(
+            n,
+            ctypes.addressof(all_rows_a),
+            ctypes.addressof(all_cols_a),
+            ctypes.addressof(all_cols_b),
+            ctypes.addressof(all_a_rowptr),
+            ctypes.addressof(all_a_colidx),
+            ctypes.addressof(all_a_vals),
+            ctypes.addressof(all_b_rowptr),
+            ctypes.addressof(all_b_colidx),
+            ctypes.addressof(all_b_vals),
+            ctypes.addressof(all_result),
+            ctypes.addressof(latencies_ns),
+            block_size,
+        )
+    elif method == "parallel":
+        all_a_rowptr = PtrArray(*(tc["a_rowptr"].buffer_info()[0] for tc in cases))
+        all_a_colidx = PtrArray(*(ctypes.cast(tc["a_colidx"].buffer_info()[0], ctypes.c_void_p).value for tc in cases))
+        all_a_vals = PtrArray(*(ctypes.addressof(tc["a_vals"]) for tc in cases))
+
+        _lib.sparse_matmul_batch_parallel(
+            n,
+            ctypes.addressof(all_rows_a),
+            ctypes.addressof(all_cols_a),
+            ctypes.addressof(all_cols_b),
+            ctypes.addressof(all_a_rowptr),
+            ctypes.addressof(all_a_colidx),
+            ctypes.addressof(all_a_vals),
+            ctypes.addressof(all_b_rowptr),
+            ctypes.addressof(all_b_colidx),
+            ctypes.addressof(all_b_vals),
+            ctypes.addressof(all_result),
+            ctypes.addressof(latencies_ns),
+            6,
+        )
+    else:
+        all_a_rowptr = PtrArray(*(tc["a_rowptr"].buffer_info()[0] for tc in cases))
+        all_a_colidx = PtrArray(*(ctypes.cast(tc["a_colidx"].buffer_info()[0], ctypes.c_void_p).value for tc in cases))
+        all_a_vals = PtrArray(*(ctypes.addressof(tc["a_vals"]) for tc in cases))
+
+        _lib.sparse_matmul_batch(
+            n,
+            ctypes.addressof(all_rows_a),
+            ctypes.addressof(all_cols_a),
+            ctypes.addressof(all_cols_b),
+            ctypes.addressof(all_a_rowptr),
+            ctypes.addressof(all_a_colidx),
+            ctypes.addressof(all_a_vals),
+            ctypes.addressof(all_b_rowptr),
+            ctypes.addressof(all_b_colidx),
+            ctypes.addressof(all_b_vals),
+            ctypes.addressof(all_result),
+            ctypes.addressof(latencies_ns),
+        )
 
     return [latencies_ns[i] / 1e6 for i in range(n)]  # ns -> ms
 
@@ -166,12 +298,29 @@ def log(msg, file=None):
         file.write(msg + "\n")
 
 
+def run_experiment(cases, method="serial", num_runs=5):
+    """Run experiment num_runs times, return (mean, std, per_case_latencies)."""
+    import statistics
+    all_avgs = []
+    last_latencies = None
+    for run in range(num_runs):
+        latencies_ms = run_batch(cases, method=method)
+        avg = sum(latencies_ms) / len(latencies_ms)
+        all_avgs.append(avg)
+        last_latencies = latencies_ms
+    mean = statistics.mean(all_avgs)
+    std = statistics.stdev(all_avgs) if len(all_avgs) > 1 else 0.0
+    return mean, std, last_latencies
+
+
 def main():
+    import sys
+    method = sys.argv[1] if len(sys.argv) > 1 else "parallel"
     results = []
     log_file = open("output.log", "w")
     cases = load_test_cases()
 
-    latencies_ms = run_batch(cases)
+    mean_lat, std_lat, latencies_ms = run_experiment(cases, method=method)
 
     for i, tc in enumerate(cases):
         name = tc["name"]
@@ -205,19 +354,19 @@ def main():
         writer.writerows(results)
 
         passed = sum(1 for r in results if r["solution"] == "correct")
-        latencies = [float(r["latency"].replace(" ms", "")) for r in results]
-        avg_latency = sum(latencies) / len(latencies) if latencies else 0
 
         writer.writerow({
             "test_case": "SUMMARY",
             "solution": f"{passed}/{len(results)} passed",
-            "latency": f"{avg_latency:.4f} ms",
-            "observation": "Average latency across all test cases",
+            "latency": f"{mean_lat:.4f} ms",
+            "observation": f"mean ± std over 5 runs",
         })
 
-    log(f"\n{passed}/{len(results)} passed, avg latency: {avg_latency:.4f} ms", log_file)
+    log(f"\n{passed}/{len(results)} passed", log_file)
+    log(f"Method: {method}, avg latency: {mean_lat:.4f} ± {std_lat:.4f} ms", log_file)
     log(f"Results written to results.tsv", log_file)
     log_file.close()
+    print(f"Method: {method}, avg latency: {mean_lat:.4f} ± {std_lat:.4f} ms")
 
 
 if __name__ == "__main__":

@@ -234,3 +234,26 @@
 - **Observation**: Parallel execution dominates all single-threaded algorithmic optimizations at this point. The per-thread work is memory-bandwidth bound, so scaling is sub-linear (6 threads → 4.1x speedup, not 6x). Further gains require either reducing bandwidth per scatter op or deeper algorithmic innovation.
 
 ---
+
+### Experiment 21 — Per-Pair Lazy Zeroing + Algorithm Survey (LZMP)
+
+- **Tag**: apr07_0116 — Experiment 21 — pending
+- **Algorithm**: Replace upfront `memset(result, 0, rows_a*cols_b*8)` with per-pair zeroing: zero each pair of result rows just before processing them. Keeps result rows L1-hot during scatter. Also surveyed multiple alternative algorithms:
+  - Outer product (CSC A × CSR B): load each B-row once across all A rows
+  - Row-block M-way merge (M=2,4,8): share B-rows across M rows
+  - No-merge independent rows: eliminate merge overhead
+- **Time Complexity**: Same O(nnz(A) * avg_nnz_per_row(B)). Per-pair zeroing changes memory access pattern only.
+- **Pros**: 8% improvement over upfront memset. Result rows are L1-hot when scatter begins. No algorithmic overhead.
+- **Cons**: Minimal improvement — algorithm is memory-bandwidth bound at this point.
+- **Result**: 50/50 passed, avg latency 0.9115 ± 0.0236 ms (serial, 10791x vs baseline)
+- **Measurement**: 5 runs: per-pair zeroing consistently 0.91ms.
+- **Variants tested**:
+  - Outer product (CSC A × CSR B): 1.252ms (26% WORSE — random scatter across result rows)
+  - Row-block M=2: 0.993ms (same as pair merge)
+  - Row-block M=4: 1.043ms (5% worse — M-way merge overhead)
+  - Row-block M=8: 1.091ms (10% worse)
+  - No-merge + per-row zero: 0.927ms (7% better than upfront memset, but merge still helps ~1.6%)
+  - Per-pair lazy zero + merge: 0.912ms ← **best** (8% improvement)
+- **Observation**: The outer product approach reduces total B-row data loads but the scattered writes to different result rows cause L1 thrashing. Row-blocking M>2 adds merge overhead that exceeds B-row sharing benefit. The merge-iterate pair is near-optimal: it balances B-row sharing, merge simplicity, and result cache locality. Per-pair zeroing ensures result rows are L1-hot. Serial algorithm approaches asymptotic optimality.
+
+---
