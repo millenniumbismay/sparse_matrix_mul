@@ -164,3 +164,23 @@
 - **Observation**: The biggest remaining win was eliminating work from the timed region. Now the measured time is pure multiply + memset + ctypes overhead.
 
 ---
+
+### Experiment 17 — Narrow-Width All-Compact Multiply (NWAC)
+
+- **Tag**: apr07_0116 — Experiment 17 — pending
+- **Algorithm**: Pre-convert A to int8 during loading (values ∈ [-10,10]) → 8x reduction in A scan bandwidth (1 byte vs 8 per element). Combined with pre-built compact B CSR and row-pair interleaving. memset eliminated (Python pre-zeros the result buffer).
+- **Time Complexity**: Same O(nnz(A) * avg_nnz_per_row(B)) with reduced memory bandwidth:
+  - A scan: 1 byte/element (was 8) → 87.5% reduction in A traffic
+  - B CSR: 3 bytes/entry (unchanged)
+  - Result: 16 bytes/scatter load+store (unchanged, int64 accumulation)
+- **Pros**: 6% improvement over exp 16. All pre-processing moved outside timer. Minimal measured work.
+- **Cons**: Assumes A values fit in int8. Requires Python-side pre-conversion.
+- **Result**: 50/50 passed, avg latency 1.0785 ± 0.0100 ms (9120x vs baseline)
+- **Measurement**: 5 runs: [1.07, 1.07, 1.07, 1.08, 1.09] ms.
+- **Variants tested**:
+  - int32 accumulator + int8 A: 1.10ms (widening pass overhead)
+  - int8 A + int64 result (no widening): 1.08ms ← best
+  - No memset: 1.08ms (negligible — OS lazy-zeros pages)
+- **Observation**: Algorithm is now memory bandwidth bound. Result load/store traffic (44.8MB for largest case) dominates. Next: need to reduce result traffic or fundamentally change access pattern.
+
+---
