@@ -1,52 +1,52 @@
-test_case	solution	latency	observation
-test_1	correct	0.1767 ms	Output matches expected result
-test_2	correct	0.0467 ms	Output matches expected result
-test_3	correct	0.0862 ms	Output matches expected result
-test_4	correct	0.4165 ms	Output matches expected result
-test_5	correct	0.0975 ms	Output matches expected result
-test_6	correct	0.1394 ms	Output matches expected result
-test_7	correct	0.1039 ms	Output matches expected result
-test_8	correct	0.6588 ms	Output matches expected result
-test_9	correct	0.0829 ms	Output matches expected result
-test_10	correct	0.1494 ms	Output matches expected result
-test_11	correct	0.1746 ms	Output matches expected result
-test_12	correct	0.1673 ms	Output matches expected result
-test_13	correct	0.1643 ms	Output matches expected result
-test_14	correct	0.1311 ms	Output matches expected result
-test_15	correct	0.2294 ms	Output matches expected result
-test_16	correct	0.1082 ms	Output matches expected result
-test_17	correct	0.1679 ms	Output matches expected result
-test_18	correct	0.3862 ms	Output matches expected result
-test_19	correct	0.3468 ms	Output matches expected result
-test_20	correct	0.3714 ms	Output matches expected result
-test_21	correct	0.4874 ms	Output matches expected result
-test_22	correct	0.0679 ms	Output matches expected result
-test_23	correct	0.0951 ms	Output matches expected result
-test_24	correct	0.0416 ms	Output matches expected result
-test_25	correct	0.1022 ms	Output matches expected result
-test_26	correct	0.0870 ms	Output matches expected result
-test_27	correct	0.0572 ms	Output matches expected result
-test_28	correct	0.1130 ms	Output matches expected result
-test_29	correct	0.0737 ms	Output matches expected result
-test_30	correct	0.1427 ms	Output matches expected result
-test_31	correct	0.2258 ms	Output matches expected result
-test_32	correct	0.0498 ms	Output matches expected result
-test_33	correct	0.3807 ms	Output matches expected result
-test_34	correct	0.0857 ms	Output matches expected result
-test_35	correct	0.1582 ms	Output matches expected result
-test_36	correct	0.1106 ms	Output matches expected result
-test_37	correct	0.1159 ms	Output matches expected result
-test_38	correct	0.5877 ms	Output matches expected result
-test_39	correct	0.0737 ms	Output matches expected result
-test_40	correct	0.1435 ms	Output matches expected result
-test_41	correct	0.0967 ms	Output matches expected result
-test_42	correct	0.0882 ms	Output matches expected result
-test_43	correct	0.0308 ms	Output matches expected result
-test_44	correct	0.0776 ms	Output matches expected result
-test_45	correct	0.4066 ms	Output matches expected result
-test_46	correct	0.4181 ms	Output matches expected result
-test_47	correct	0.0328 ms	Output matches expected result
-test_48	correct	0.3921 ms	Output matches expected result
-test_49	correct	0.7805 ms	Output matches expected result
-test_50	correct	0.1558 ms	Output matches expected result
-SUMMARY	50/50 passed	0.2084 ms	mean ± std over 5 runs
+test_case	solution	serial_latency	parallel_latency	observation
+test_1	correct	0.8323 ms	0.1651 ms	Output matches expected result
+test_2	correct	0.1454 ms	0.0500 ms	Output matches expected result
+test_3	correct	0.1505 ms	0.0516 ms	Output matches expected result
+test_4	correct	0.7241 ms	0.1803 ms	Output matches expected result
+test_5	correct	0.3603 ms	0.0870 ms	Output matches expected result
+test_6	correct	0.6152 ms	0.1417 ms	Output matches expected result
+test_7	correct	0.3781 ms	0.1035 ms	Output matches expected result
+test_8	correct	3.3598 ms	0.4846 ms	Output matches expected result
+test_9	correct	0.3066 ms	0.0846 ms	Output matches expected result
+test_10	correct	0.7118 ms	0.1369 ms	Output matches expected result
+test_11	correct	0.8365 ms	0.5521 ms	Output matches expected result
+test_12	correct	0.7472 ms	0.1846 ms	Output matches expected result
+test_13	correct	0.7579 ms	0.1586 ms	Output matches expected result
+test_14	correct	0.5800 ms	0.1254 ms	Output matches expected result
+test_15	correct	1.1010 ms	0.1845 ms	Output matches expected result
+test_16	correct	0.4626 ms	0.1123 ms	Output matches expected result
+test_17	correct	0.7613 ms	0.5703 ms	Output matches expected result
+test_18	correct	1.8918 ms	0.3328 ms	Output matches expected result
+test_19	correct	1.6504 ms	0.5427 ms	Output matches expected result
+test_20	correct	1.7984 ms	0.3158 ms	Output matches expected result
+test_21	correct	2.5287 ms	0.6255 ms	Output matches expected result
+test_22	correct	0.2614 ms	0.0822 ms	Output matches expected result
+test_23	correct	0.1852 ms	0.0672 ms	Output matches expected result
+test_24	correct	0.0650 ms	0.0285 ms	Output matches expected result
+test_25	correct	0.2152 ms	0.0555 ms	Output matches expected result
+test_26	correct	0.3113 ms	0.0992 ms	Output matches expected result
+test_27	correct	0.1845 ms	0.0658 ms	Output matches expected result
+test_28	correct	0.4903 ms	0.5189 ms	Output matches expected result
+test_29	correct	0.3152 ms	0.1097 ms	Output matches expected result
+test_30	correct	0.4302 ms	0.1410 ms	Output matches expected result
+test_31	correct	1.0806 ms	0.1932 ms	Output matches expected result
+test_32	correct	0.0565 ms	0.0318 ms	Output matches expected result
+test_33	correct	1.9119 ms	0.2951 ms	Output matches expected result
+test_34	correct	0.2019 ms	0.0630 ms	Output matches expected result
+test_35	correct	0.7843 ms	0.1563 ms	Output matches expected result
+test_36	correct	0.4775 ms	0.1014 ms	Output matches expected result
+test_37	correct	0.5069 ms	0.1187 ms	Output matches expected result
+test_38	correct	3.0735 ms	0.4595 ms	Output matches expected result
+test_39	correct	0.2883 ms	0.0905 ms	Output matches expected result
+test_40	correct	0.6384 ms	0.5624 ms	Output matches expected result
+test_41	correct	0.3974 ms	0.1478 ms	Output matches expected result
+test_42	correct	0.3239 ms	0.0887 ms	Output matches expected result
+test_43	correct	0.0532 ms	0.0637 ms	Output matches expected result
+test_44	correct	0.2137 ms	0.2232 ms	Output matches expected result
+test_45	correct	2.0399 ms	0.6571 ms	Output matches expected result
+test_46	correct	2.1952 ms	0.3303 ms	Output matches expected result
+test_47	correct	0.0362 ms	0.0260 ms	Output matches expected result
+test_48	correct	2.0291 ms	0.3153 ms	Output matches expected result
+test_49	correct	4.0357 ms	0.5339 ms	Output matches expected result
+test_50	correct	0.7885 ms	0.1466 ms	Output matches expected result
+SUMMARY	50/50 passed	0.8963 ms	0.1872 ms	mean ± std over 5 runs

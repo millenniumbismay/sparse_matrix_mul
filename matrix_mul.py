@@ -36,6 +36,27 @@ _lib.sparse_matmul_batch_outer.argtypes = [
     ctypes.c_void_p,
 ]
 
+_lib.sparse_matmul_batch_radix.restype = None
+_lib.sparse_matmul_batch_radix.argtypes = [
+    ctypes.c_int,
+    ctypes.c_void_p, ctypes.c_void_p, ctypes.c_void_p,
+    ctypes.c_void_p, ctypes.c_void_p, ctypes.c_void_p,
+    ctypes.c_void_p, ctypes.c_void_p, ctypes.c_void_p,
+    ctypes.c_void_p,
+    ctypes.c_void_p,
+]
+
+_lib.sparse_matmul_batch_diag.restype = None
+_lib.sparse_matmul_batch_diag.argtypes = [
+    ctypes.c_int,
+    ctypes.c_void_p, ctypes.c_void_p, ctypes.c_void_p,
+    ctypes.c_void_p, ctypes.c_void_p, ctypes.c_void_p,
+    ctypes.c_void_p, ctypes.c_void_p, ctypes.c_void_p,
+    ctypes.c_void_p,
+    ctypes.c_void_p,
+    ctypes.c_int,
+]
+
 _lib.sparse_matmul_batch_nomerge.restype = None
 _lib.sparse_matmul_batch_nomerge.argtypes = [
     ctypes.c_int,
@@ -209,6 +230,46 @@ def run_batch(cases, method="serial"):
             ctypes.addressof(all_result),
             ctypes.addressof(latencies_ns),
         )
+    elif method == "radix":
+        all_a_rowptr = PtrArray(*(tc["a_rowptr"].buffer_info()[0] for tc in cases))
+        all_a_colidx = PtrArray(*(ctypes.cast(tc["a_colidx"].buffer_info()[0], ctypes.c_void_p).value for tc in cases))
+        all_a_vals = PtrArray(*(ctypes.addressof(tc["a_vals"]) for tc in cases))
+
+        _lib.sparse_matmul_batch_radix(
+            n,
+            ctypes.addressof(all_rows_a),
+            ctypes.addressof(all_cols_a),
+            ctypes.addressof(all_cols_b),
+            ctypes.addressof(all_a_rowptr),
+            ctypes.addressof(all_a_colidx),
+            ctypes.addressof(all_a_vals),
+            ctypes.addressof(all_b_rowptr),
+            ctypes.addressof(all_b_colidx),
+            ctypes.addressof(all_b_vals),
+            ctypes.addressof(all_result),
+            ctypes.addressof(latencies_ns),
+        )
+    elif method == "diag_memset" or method == "diag_scatter":
+        mode = 0 if method == "diag_memset" else 1
+        all_a_rowptr = PtrArray(*(tc["a_rowptr"].buffer_info()[0] for tc in cases))
+        all_a_colidx = PtrArray(*(ctypes.cast(tc["a_colidx"].buffer_info()[0], ctypes.c_void_p).value for tc in cases))
+        all_a_vals = PtrArray(*(ctypes.addressof(tc["a_vals"]) for tc in cases))
+
+        _lib.sparse_matmul_batch_diag(
+            n,
+            ctypes.addressof(all_rows_a),
+            ctypes.addressof(all_cols_a),
+            ctypes.addressof(all_cols_b),
+            ctypes.addressof(all_a_rowptr),
+            ctypes.addressof(all_a_colidx),
+            ctypes.addressof(all_a_vals),
+            ctypes.addressof(all_b_rowptr),
+            ctypes.addressof(all_b_colidx),
+            ctypes.addressof(all_b_vals),
+            ctypes.addressof(all_result),
+            ctypes.addressof(latencies_ns),
+            mode,
+        )
     elif method == "nomerge":
         all_a_rowptr = PtrArray(*(tc["a_rowptr"].buffer_info()[0] for tc in cases))
         all_a_colidx = PtrArray(*(ctypes.cast(tc["a_colidx"].buffer_info()[0], ctypes.c_void_p).value for tc in cases))
@@ -315,39 +376,43 @@ def run_experiment(cases, method="serial", num_runs=5):
 
 def main():
     import sys
-    method = sys.argv[1] if len(sys.argv) > 1 else "parallel"
     results = []
     log_file = open("output.log", "w")
     cases = load_test_cases()
 
-    mean_lat, std_lat, latencies_ms = run_experiment(cases, method=method)
+    # Always run both serial (core algorithm) and parallel
+    serial_mean, serial_std, serial_latencies = run_experiment(cases, method="serial")
+    parallel_mean, parallel_std, parallel_latencies = run_experiment(cases, method="parallel")
 
+    # Use serial run for correctness checking (algorithm is identical)
     for i, tc in enumerate(cases):
         name = tc["name"]
         rb = tc["result_buf"]
-        latency_ms = latencies_ms[i]
+        s_lat = serial_latencies[i]
+        p_lat = parallel_latencies[i]
 
         try:
             assert rb == tc["expected"], "Output mismatch"
             solution = "correct"
             observation = "Output matches expected result"
-            log(f"  PASS  {name} ({latency_ms:.4f} ms)", log_file)
+            log(f"  PASS  {name} (serial: {s_lat:.4f} ms, parallel: {p_lat:.4f} ms)", log_file)
         except AssertionError as e:
             solution = "incorrect"
             observation = str(e)
-            log(f"  FAIL  {name} ({latency_ms:.4f} ms) — {e}", log_file)
+            log(f"  FAIL  {name} (serial: {s_lat:.4f} ms, parallel: {p_lat:.4f} ms) — {e}", log_file)
 
         results.append({
             "test_case": name,
             "solution": solution,
-            "latency": f"{latency_ms:.4f} ms",
+            "serial_latency": f"{s_lat:.4f} ms",
+            "parallel_latency": f"{p_lat:.4f} ms",
             "observation": observation,
         })
 
     with open("results.tsv", "w", newline="") as f:
         writer = csv.DictWriter(
             f,
-            fieldnames=["test_case", "solution", "latency", "observation"],
+            fieldnames=["test_case", "solution", "serial_latency", "parallel_latency", "observation"],
             delimiter="\t",
         )
         writer.writeheader()
@@ -358,15 +423,18 @@ def main():
         writer.writerow({
             "test_case": "SUMMARY",
             "solution": f"{passed}/{len(results)} passed",
-            "latency": f"{mean_lat:.4f} ms",
+            "serial_latency": f"{serial_mean:.4f} ms",
+            "parallel_latency": f"{parallel_mean:.4f} ms",
             "observation": f"mean ± std over 5 runs",
         })
 
     log(f"\n{passed}/{len(results)} passed", log_file)
-    log(f"Method: {method}, avg latency: {mean_lat:.4f} ± {std_lat:.4f} ms", log_file)
+    log(f"Serial:   {serial_mean:.4f} ± {serial_std:.4f} ms (core algorithm)", log_file)
+    log(f"Parallel: {parallel_mean:.4f} ± {parallel_std:.4f} ms (6 threads)", log_file)
     log(f"Results written to results.tsv", log_file)
     log_file.close()
-    print(f"Method: {method}, avg latency: {mean_lat:.4f} ± {std_lat:.4f} ms")
+    print(f"Serial:   {serial_mean:.4f} ± {serial_std:.4f} ms (core algorithm)")
+    print(f"Parallel: {parallel_mean:.4f} ± {parallel_std:.4f} ms (6 threads)")
 
 
 if __name__ == "__main__":

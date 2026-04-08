@@ -25,7 +25,20 @@ You launch each experiment using `python3 matrix_mul.py`
 
 ### Goal
 
-Get the lowest average latency while making sure that all test cases pass
+Get the lowest average latency while making sure that all test cases pass. The primary focus is **core algorithm evolution** — the serial (single-threaded) latency is the key metric that shows algorithmic progress. Parallelization is a multiplier on top of the core algorithm, not a substitute for it.
+
+### Dual Reporting: Serial + Parallel
+
+Every experiment MUST report both serial and parallel latencies:
+- **Serial latency**: Core algorithm performance (single-threaded). This is the primary metric for evaluating algorithmic improvements.
+- **Parallel latency**: Parallelized performance (6 threads via GCD). Shows the combined effect of algorithm + infrastructure.
+
+`matrix_mul.py` runs both methods automatically. `all_results.tsv` has `serial_latency` and `parallel_latency` columns. The results plot shows both lines — green for serial (core algorithm), blue dashed for parallel.
+
+When evaluating whether to keep an experiment:
+- An improvement in serial latency = core algorithmic win (always keep if tests pass)
+- An improvement in parallel-only = infrastructure win (less interesting unless it reveals an algorithmic insight)
+- The keep/discard decision should primarily be based on serial latency
 
 ### Methodology
 
@@ -47,15 +60,13 @@ Note that `matrix_mul.py` will always run on the test cases. Do NOT try to hack 
 
 #### Logging results
 
-branch_tag, experiment_id, commit_hash (short), solutions_passed (from SUMMARY), average_latency (from SUMMARY), status (keep/discard/crash) observation (inferred)
+branch_tag, experiment_id, commit_hash (short), solutions_passed (from SUMMARY), serial_latency (from SUMMARY), parallel_latency (from SUMMARY), status (keep/discard/crash) observation (inferred)
 
 **Example:**
-branch_tag, experiment_id, commit_hash, solutions_passed, average_latency, status, observation
-<date1>_<time1>, 1, a1b2c3d, 50/50, 8006.7623 ms, keep, baseline
-<date1>_<time2>, 2, b2c3d4e, 50/50, 7560.6350 ms, keep, <idea1>: modified row handling - improved 40 high latency test cases
-<date2>_<time3>, 3, c3d4e5f, 35/50, 2300.54 ms, discard, 15 test cases failed, restarting from previous commit
-<date3>_<time4>, 4, d4e5f6g, 50/50, 12007.635 ms, discard, avg latency increased by 50%, <idea2> might be useful later, but restarting form previous commit
-<date3>_<time5>, 5, e5f6g7h, None, None, crashed, Issues with the run - Error Trace/Infinite Loop/Out of Memory etc
+branch_tag, experiment_id, commit_hash, solutions_passed, serial_latency, parallel_latency, status, observation
+<date1>_<time1>, 1, a1b2c3d, 50/50, 8006.7623 ms, —, keep, baseline
+<date1>_<time2>, 2, b2c3d4e, 50/50, 0.9100 ms, 0.2200 ms, keep, <idea1>: modified row handling - improved 40 high latency test cases
+<date2>_<time3>, 3, c3d4e5f, 35/50, 2300.54 ms, 500.12 ms, discard, 15 test cases failed, restarting from previous commit
 
 ### The Experiment Loop
 

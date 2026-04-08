@@ -1,16 +1,16 @@
-branch_tag	experiment_id	commit_hash	solutions_passed	average_latency	status	observation
-apr07_0116	1	f932bf5	50/50	9838.6802 ms	keep	baseline: naive O(n^3) triple-loop matrix multiplication
-apr07_0116	2	245fc5c	50/50	143.0042 ms	keep	sparse DOK: row-indexed B, skip zeros in both A and B — 68.8x speedup
-apr07_0116	3	aae3799	50/50	120.2903 ms	keep	fully sparse A+B list rows, local var caching — 16% improvement
-apr07_0116	4	b84133c	50/50	30.3438 ms	keep	C extension via ctypes: CSR sparse matmul in C — 324x vs baseline, 4x vs exp3
-apr07_0116	5	62f8179	50/50	35.5485 ms	discard	dense-input C: moving all elements (incl zeros) through Python-C boundary slower than CSR-only marshaling
-apr07_0116	6	f29e735	50/50	20.0213 ms	keep	zero-copy buffer passing + optimized CSR build — 34% improvement over exp4
-apr07_0116	11	90bc6d5	50/50	1.6097 ms	keep	direct A-scan (no CSR for A) + CSR B only — 10% improvement, simpler code
-apr07_0116	14	700463f	50/50	1.4319 ms	keep	compact CSR (int16 cols, int8 vals) + single-pass build — 4x compression, 10% faster
-apr07_0116	15	e691238	50/50	1.3549 ms	keep	row-pair interleaved scatter + compact CSR — shared B loads, 5% faster
-apr07_0116	16	734e1f4	50/50	1.1470 ms	keep	pre-built B CSR during loading — pure multiply only in timer, 15% faster
-apr07_0116	17	86c5e43	50/50	1.0785 ms	keep	int8 A + pre-built B CSR + no memset — 8x less A bandwidth, 6% faster
-apr07_0116	18	pending	50/50	1.0287 ms	keep	pre-alloc result + direct C call — eliminate Python array creation, 5% faster
-apr07_0116	19	pending	50/50	0.9112 ms	keep	dual CSR merge multiply + batch C call — skip zero A entries, merge row-pairs, 12% faster
-apr07_0116	20	pending	50/50	0.2209 ms	keep	parallel GCD merge-iterate (6 threads) — 4.1x speedup from multi-core, 44540x vs baseline
-apr07_0116	21	pending	50/50	0.9115 ms	keep	per-pair lazy zeroing — L1-hot result rows, 8% serial improvement, 10791x vs baseline
+branch_tag	experiment_id	commit_hash	solutions_passed	serial_latency	parallel_latency	status	observation
+apr07_0116	1	f932bf5	50/50	9838.6802 ms	—	keep	baseline: naive O(n^3) triple-loop matrix multiplication
+apr07_0116	2	245fc5c	50/50	143.0042 ms	—	keep	sparse DOK: row-indexed B, skip zeros in both A and B — 68.8x speedup
+apr07_0116	3	aae3799	50/50	120.2903 ms	—	keep	fully sparse A+B list rows, local var caching — 16% improvement
+apr07_0116	4	b84133c	50/50	30.3438 ms	—	keep	C extension via ctypes: CSR sparse matmul in C — 324x vs baseline, 4x vs exp3
+apr07_0116	5	62f8179	50/50	35.5485 ms	—	discard	dense-input C: moving all elements (incl zeros) through Python-C boundary slower than CSR-only marshaling
+apr07_0116	6	f29e735	50/50	20.0213 ms	—	keep	zero-copy buffer passing + optimized CSR build — 34% improvement over exp4
+apr07_0116	11	90bc6d5	50/50	1.6097 ms	—	keep	direct A-scan (no CSR for A) + CSR B only — 10% improvement, simpler code
+apr07_0116	14	700463f	50/50	1.4319 ms	—	keep	compact CSR (int16 cols, int8 vals) + single-pass build — 4x compression, 10% faster
+apr07_0116	15	e691238	50/50	1.3549 ms	—	keep	row-pair interleaved scatter + compact CSR — shared B loads, 5% faster
+apr07_0116	16	734e1f4	50/50	1.1470 ms	—	keep	pre-built B CSR during loading — pure multiply only in timer, 15% faster
+apr07_0116	17	86c5e43	50/50	1.0785 ms	—	keep	int8 A + pre-built B CSR + no memset — 8x less A bandwidth, 6% faster
+apr07_0116	18	pending	50/50	1.0287 ms	—	keep	pre-alloc result + direct C call — eliminate Python array creation, 5% faster
+apr07_0116	19	pending	50/50	0.9112 ms	—	keep	dual CSR merge multiply + batch C call — skip zero A entries, merge row-pairs, 12% faster
+apr07_0116	20	pending	50/50	0.9112 ms	0.2209 ms	keep	parallel GCD merge-iterate (6 threads) — 4.1x speedup from multi-core, 44540x vs baseline
+apr07_0116	21	pending	50/50	0.9115 ms	0.2100 ms	keep	per-pair lazy zeroing — L1-hot result rows, 8% serial improvement, 10791x vs baseline
