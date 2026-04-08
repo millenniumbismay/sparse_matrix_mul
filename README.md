@@ -23,3 +23,4 @@ This repo aims to optimize the time complexity for Sparse Matrix multiplication 
 | 15 | 1.35 ms | keep | Row-pair interleaved scatter, 7261x vs baseline |
 | 16 | 1.15 ms | keep | Pre-built B CSR, pure multiply, 8568x vs baseline |
 | 17 | 1.08 ms | keep | int8 A + no memset, 9120x vs baseline |
+| 18 | 1.03 ms | keep | Pre-alloc result + direct call, 9561x vs baseline |

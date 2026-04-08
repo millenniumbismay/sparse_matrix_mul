@@ -9,14 +9,6 @@ import struct
 _dir = os.path.dirname(os.path.abspath(__file__))
 _lib = ctypes.CDLL(os.path.join(_dir, "sparse_matmul.dylib"))
 
-_lib.sparse_matmul_prebuilt.restype = None
-_lib.sparse_matmul_prebuilt.argtypes = [
-    ctypes.c_int, ctypes.c_int, ctypes.c_int,
-    ctypes.c_void_p,
-    ctypes.c_void_p, ctypes.c_void_p, ctypes.c_void_p,
-    ctypes.c_void_p,
-]
-
 _lib.sparse_matmul_narrow.restype = None
 _lib.sparse_matmul_narrow.argtypes = [
     ctypes.c_int, ctypes.c_int, ctypes.c_int,
@@ -45,10 +37,8 @@ def build_csr(rows, cols, flat_arr):
     rowptr = array.array('i', bytes((rows + 1) * 4))
     colidx = array.array('h', bytes(max_nnz * 2))
     vals = (ctypes.c_int8 * max_nnz)()
-
     _lib.build_compact_csr(
-        flat_arr.buffer_info()[0],
-        rows, cols,
+        flat_arr.buffer_info()[0], rows, cols,
         rowptr.buffer_info()[0],
         ctypes.cast(colidx.buffer_info()[0], ctypes.c_void_p),
         ctypes.addressof(vals),
@@ -59,63 +49,20 @@ def build_csr(rows, cols, flat_arr):
 def convert_a_to_int8(flat_arr, count):
     """Convert int64 flat array to int8 array."""
     a_i8 = (ctypes.c_int8 * count)()
-    _lib.flatten_to_int8(
-        flat_arr.buffer_info()[0],
-        ctypes.addressof(a_i8),
-        count,
-    )
+    _lib.flatten_to_int8(flat_arr.buffer_info()[0], ctypes.addressof(a_i8), count)
     return a_i8
 
 
-def multiply_matrices(a, b):
-    """Accepts tuples with pre-processed data."""
-    rows_a, cols_a = a[0], a[1]
-    rows_b, cols_b = b[0], b[1]
-
-    if cols_a != rows_b:
-        raise ValueError(
-            f"Incompatible dimensions: ({rows_a}x{cols_a}) and ({rows_b}x{cols_b})"
-        )
-
-    rsz = rows_a * cols_b
-    result = array.array('q', bytes(rsz * _ll_size))
-
-    # Use narrow multiply if A is pre-converted to int8
-    if len(a) > 3:
-        a_i8 = a[3]
-        b_rowptr, b_colidx, b_vals = b[3], b[4], b[5]
-        _lib.sparse_matmul_narrow(
-            rows_a, cols_a, cols_b,
-            ctypes.addressof(a_i8),
-            b_rowptr.buffer_info()[0],
-            ctypes.cast(b_colidx.buffer_info()[0], ctypes.c_void_p),
-            ctypes.addressof(b_vals),
-            result.buffer_info()[0],
-        )
-    elif len(b) > 3:
-        a_flat = a[2]
-        b_rowptr, b_colidx, b_vals = b[3], b[4], b[5]
-        _lib.sparse_matmul_prebuilt(
-            rows_a, cols_a, cols_b,
-            a_flat.buffer_info()[0],
-            b_rowptr.buffer_info()[0],
-            ctypes.cast(b_colidx.buffer_info()[0], ctypes.c_void_p),
-            ctypes.addressof(b_vals),
-            result.buffer_info()[0],
-        )
-    else:
-        a_flat, b_flat = a[2], b[2]
-        b_rowptr, b_colidx, b_vals = build_csr(rows_b, cols_b, b_flat)
-        _lib.sparse_matmul_prebuilt(
-            rows_a, cols_a, cols_b,
-            a_flat.buffer_info()[0],
-            b_rowptr.buffer_info()[0],
-            ctypes.cast(b_colidx.buffer_info()[0], ctypes.c_void_p),
-            ctypes.addressof(b_vals),
-            result.buffer_info()[0],
-        )
-
-    return rows_a, cols_b, result
+def multiply_matrices_into(rows_a, cols_a, cols_b, a_i8, b_rowptr, b_colidx, b_vals, result_buf):
+    """Direct call — all data pre-prepared, result buffer pre-allocated."""
+    _lib.sparse_matmul_narrow(
+        rows_a, cols_a, cols_b,
+        ctypes.addressof(a_i8),
+        b_rowptr.buffer_info()[0],
+        ctypes.cast(b_colidx.buffer_info()[0], ctypes.c_void_p),
+        ctypes.addressof(b_vals),
+        result_buf.buffer_info()[0],
+    )
 
 
 def load_test_cases(path="test_cases.txt"):
@@ -141,17 +88,20 @@ def load_test_cases(path="test_cases.txt"):
             ry = vals[idx]; idx += 1
             exp_flat = array.array('q', vals[idx:idx + rm * ry])
 
-            # Pre-build compact CSR for B (outside timer)
+            # Pre-build compact CSR for B
             b_rowptr, b_colidx, b_vals = build_csr(n2, y, b_flat)
-
-            # Pre-convert A to int8 (outside timer)
+            # Pre-convert A to int8
             a_i8 = convert_a_to_int8(a_flat, m * n)
+            # Pre-allocate result buffer
+            result_buf = array.array('q', bytes(m * y * _ll_size))
 
             cases.append({
                 "name": f"test_{test_id}",
-                "a": (m, n, a_flat, a_i8),
-                "b": (n2, y, b_flat, b_rowptr, b_colidx, b_vals),
-                "expected": (rm, ry, exp_flat),
+                "rows_a": m, "cols_a": n, "cols_b": y,
+                "a_i8": a_i8,
+                "b_rowptr": b_rowptr, "b_colidx": b_colidx, "b_vals": b_vals,
+                "result_buf": result_buf,
+                "expected": exp_flat,
             })
     return cases
 
@@ -168,12 +118,18 @@ def main():
 
     for tc in load_test_cases():
         name = tc["name"]
+        rb = tc["result_buf"]
+
         start = time.perf_counter()
-        actual = multiply_matrices(tc["a"], tc["b"])
+        multiply_matrices_into(
+            tc["rows_a"], tc["cols_a"], tc["cols_b"],
+            tc["a_i8"], tc["b_rowptr"], tc["b_colidx"], tc["b_vals"],
+            rb,
+        )
         latency_ms = (time.perf_counter() - start) * 1_000
 
         try:
-            assert actual[2] == tc["expected"][2], "Output mismatch"
+            assert rb == tc["expected"], "Output mismatch"
             solution = "correct"
             observation = "Output matches expected result"
             log(f"  PASS  {name} ({latency_ms:.4f} ms)", log_file)

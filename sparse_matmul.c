@@ -58,7 +58,7 @@ void sparse_matmul_narrow(
     const int8_t *b_vals,
     long long *result
 ) {
-    /* Result buffer is pre-zeroed by Python caller — skip memset */
+    memset(result, 0, (long long)rows_a * cols_b * sizeof(long long));
 
     int i = 0;
     for (; i + 1 < rows_a; i += 2) {

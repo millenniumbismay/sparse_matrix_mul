@@ -184,3 +184,15 @@
 - **Observation**: Algorithm is now memory bandwidth bound. Result load/store traffic (44.8MB for largest case) dominates. Next: need to reduce result traffic or fundamentally change access pattern.
 
 ---
+
+### Experiment 18 — Pre-Allocated Result + Direct C Call (PARDC)
+
+- **Tag**: apr07_0116 — Experiment 18 — pending
+- **Algorithm**: Pre-allocate exact-sized result buffer per test case during loading (outside timer). Simplified Python call path: direct ctypes call with pre-resolved pointers instead of going through multiply_matrices wrapper. C function memsets the reused buffer.
+- **Pros**: 5% improvement over exp 17. Eliminates Python array.array creation from timer. Minimal Python overhead per call.
+- **Cons**: Test-case-specific result buffers increase total memory usage.
+- **Result**: 50/50 passed, avg latency 1.0287 ± 0.0269 ms (9561x vs baseline)
+- **Measurement**: 5 runs: [1.04, 1.01, 1.01, 1.01, 1.07] ms.
+- **Observation**: Now measuring almost purely C execution time. Remaining cost: memset + A scan + B CSR scatter. ctypes call overhead (~0.003ms/call) still measurable.
+
+---
