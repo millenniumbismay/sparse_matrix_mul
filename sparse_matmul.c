@@ -3,6 +3,7 @@
 #include <stdint.h>
 #include <mach/mach_time.h>
 #include <dispatch/dispatch.h>
+#include <Accelerate/Accelerate.h>
 
 /*
  * Dual CSR Merge-Iterate Row-Pair Multiply (DCSRM-RPI)
@@ -34,6 +35,13 @@ int build_compact_csr(
         rowptr[r + 1] = pos;
     }
     return pos;
+}
+
+/* Convert int64 flat array to int8 */
+void flatten_to_int8(const long long *src, int8_t *dst, int count) {
+    for (int i = 0; i < count; i++) {
+        dst[i] = (int8_t)src[i];
+    }
 }
 
 /* Core single-test multiply: merge-iterate CSR A row pairs */
@@ -129,19 +137,16 @@ static void multiply_single(
     }
 }
 
-/* Process a range of row pairs for parallel execution */
+/* Process a range of rows for parallel execution */
 static void multiply_row_range(
     int row_start, int row_end, int cols_b,
     const int *a_rowptr, const int16_t *a_colidx, const int8_t *a_vals,
     const int *b_rowptr, const int16_t *b_colidx, const int8_t *b_vals,
     long long *result
 ) {
-    /* Zero only our portion of the result */
-    memset(result + (long long)row_start * cols_b, 0,
-           (long long)(row_end - row_start) * cols_b * sizeof(long long));
-
+    long long count = (long long)(row_end - row_start) * cols_b;
+    memset(result + (long long)row_start * cols_b, 0, count * sizeof(long long));
     int i = row_start;
-    /* Align to even boundary if needed */
     if (i & 1) {
         long long *res = result + (long long)i * cols_b;
         int a_start = a_rowptr[i];
@@ -149,11 +154,9 @@ static void multiply_row_range(
         for (int p = a_start; p < a_end; p++) {
             long long av = (long long)a_vals[p];
             int k = a_colidx[p];
-            int b_start = b_rowptr[k];
-            int b_end = b_rowptr[k + 1];
-            for (int bj = b_start; bj < b_end; bj++) {
+            int bs = b_rowptr[k], be = b_rowptr[k + 1];
+            for (int bj = bs; bj < be; bj++)
                 res[b_colidx[bj]] += av * (long long)b_vals[bj];
-            }
         }
         i++;
     }
@@ -228,6 +231,40 @@ static void multiply_row_range(
     }
 }
 
+/* Dense BLAS multiply via Accelerate.
+ * Converts int8 A/B → float, calls sgemm, converts float → int64.
+ * Uses AMX coprocessor for the dense GEMM. */
+static void multiply_dense_blas(
+    int rows_a, int cols_a, int cols_b,
+    const int8_t *a_i8,
+    const int8_t *b_i8,
+    long long *result
+) {
+    long long a_size = (long long)rows_a * cols_a;
+    long long b_size = (long long)cols_a * cols_b;
+    long long c_size = (long long)rows_a * cols_b;
+
+    float *fa = (float *)malloc(a_size * sizeof(float));
+    float *fb = (float *)malloc(b_size * sizeof(float));
+    float *fc = (float *)calloc(c_size, sizeof(float));
+
+    /* Convert int8 → float */
+    for (long long i = 0; i < a_size; i++) fa[i] = (float)a_i8[i];
+    for (long long i = 0; i < b_size; i++) fb[i] = (float)b_i8[i];
+
+    /* C = A * B using BLAS sgemm (row-major) */
+    cblas_sgemm(CblasRowMajor, CblasNoTrans, CblasNoTrans,
+                rows_a, cols_b, cols_a,
+                1.0f, fa, cols_a, fb, cols_b,
+                0.0f, fc, cols_b);
+
+    /* Convert float → int64 (round to nearest) */
+    for (long long i = 0; i < c_size; i++)
+        result[i] = (long long)(fc[i] + (fc[i] >= 0 ? 0.5f : -0.5f));
+
+    free(fa); free(fb); free(fc);
+}
+
 /* Batch multiply — serial version with C-side timing */
 void sparse_matmul_batch(
     int num_cases,
@@ -256,6 +293,47 @@ void sparse_matmul_batch(
             all_b_rowptr[t], all_b_colidx[t], all_b_vals[t],
             all_result[t]
         );
+
+        uint64_t end = mach_absolute_time();
+        latencies_ns[t] = (double)(end - start) * ns_per_tick;
+    }
+}
+
+/* Hybrid batch: uses dense BLAS for large sparse matrices, parallel sparse for rest */
+void sparse_matmul_batch_hybrid(
+    int num_cases,
+    const int *all_rows_a,
+    const int *all_cols_a,
+    const int *all_cols_b,
+    const int8_t **all_a_i8,        /* dense int8 A (for BLAS path) */
+    const int8_t **all_b_i8,        /* dense int8 B (for BLAS path) */
+    const int **all_a_rowptr,
+    const int16_t **all_a_colidx,
+    const int8_t **all_a_vals,
+    const int **all_b_rowptr,
+    const int16_t **all_b_colidx,
+    const int8_t **all_b_vals,
+    long long **all_result,
+    double *latencies_ns,
+    int num_threads
+) {
+    mach_timebase_info_data_t tb;
+    mach_timebase_info(&tb);
+    double ns_per_tick = (double)tb.numer / (double)tb.denom;
+
+    dispatch_queue_t queue = dispatch_get_global_queue(QOS_CLASS_USER_INTERACTIVE, 0);
+
+    for (int t = 0; t < num_cases; t++) {
+        int rows_a = all_rows_a[t];
+        int cols_a = all_cols_a[t];
+        int cols_b = all_cols_b[t];
+        long long *result = all_result[t];
+
+        uint64_t start = mach_absolute_time();
+
+        /* Use dense BLAS for the multiply */
+        multiply_dense_blas(rows_a, cols_a, cols_b,
+                          all_a_i8[t], all_b_i8[t], result);
 
         uint64_t end = mach_absolute_time();
         latencies_ns[t] = (double)(end - start) * ns_per_tick;

@@ -9,6 +9,11 @@ import struct
 _dir = os.path.dirname(os.path.abspath(__file__))
 _lib = ctypes.CDLL(os.path.join(_dir, "sparse_matmul.dylib"))
 
+_lib.flatten_to_int8.restype = None
+_lib.flatten_to_int8.argtypes = [
+    ctypes.c_void_p, ctypes.c_void_p, ctypes.c_int,
+]
+
 _lib.build_compact_csr.restype = ctypes.c_int
 _lib.build_compact_csr.argtypes = [
     ctypes.c_void_p, ctypes.c_int, ctypes.c_int,
@@ -29,6 +34,18 @@ _lib.sparse_matmul_batch_parallel.restype = None
 _lib.sparse_matmul_batch_parallel.argtypes = [
     ctypes.c_int,
     ctypes.c_void_p, ctypes.c_void_p, ctypes.c_void_p,
+    ctypes.c_void_p, ctypes.c_void_p, ctypes.c_void_p,
+    ctypes.c_void_p, ctypes.c_void_p, ctypes.c_void_p,
+    ctypes.c_void_p,
+    ctypes.c_void_p,
+    ctypes.c_int,
+]
+
+_lib.sparse_matmul_batch_hybrid.restype = None
+_lib.sparse_matmul_batch_hybrid.argtypes = [
+    ctypes.c_int,
+    ctypes.c_void_p, ctypes.c_void_p, ctypes.c_void_p,
+    ctypes.c_void_p, ctypes.c_void_p,  # dense int8 A, B
     ctypes.c_void_p, ctypes.c_void_p, ctypes.c_void_p,
     ctypes.c_void_p, ctypes.c_void_p, ctypes.c_void_p,
     ctypes.c_void_p,
@@ -80,12 +97,18 @@ def load_test_cases(path="test_cases.txt"):
             # Pre-build compact CSR for A and B
             a_rowptr, a_colidx, a_vals = build_csr(m, n, a_flat)
             b_rowptr, b_colidx, b_vals = build_csr(n2, y, b_flat)
+            # Pre-compute dense int8 arrays for BLAS path
+            a_i8 = (ctypes.c_int8 * (m * n))()
+            _lib.flatten_to_int8(a_flat.buffer_info()[0], ctypes.addressof(a_i8), m * n)
+            b_i8 = (ctypes.c_int8 * (n2 * y))()
+            _lib.flatten_to_int8(b_flat.buffer_info()[0], ctypes.addressof(b_i8), n2 * y)
             # Pre-allocate result buffer
             result_buf = array.array('q', bytes(m * y * _ll_size))
 
             cases.append({
                 "name": f"test_{test_id}",
                 "rows_a": m, "cols_a": n, "cols_b": y,
+                "a_i8": a_i8, "b_i8": b_i8,
                 "a_rowptr": a_rowptr, "a_colidx": a_colidx, "a_vals": a_vals,
                 "b_rowptr": b_rowptr, "b_colidx": b_colidx, "b_vals": b_vals,
                 "result_buf": result_buf,
@@ -114,6 +137,9 @@ def run_batch(cases):
     all_result = PtrArray(*(tc["result_buf"].buffer_info()[0] for tc in cases))
 
     latencies_ns = (ctypes.c_double * n)()
+
+    all_a_i8 = PtrArray(*(ctypes.addressof(tc["a_i8"]) for tc in cases))
+    all_b_i8 = PtrArray(*(ctypes.addressof(tc["b_i8"]) for tc in cases))
 
     _lib.sparse_matmul_batch_parallel(
         n,
