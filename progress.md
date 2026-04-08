@@ -213,3 +213,24 @@
 - **Observation**: The merge-iterate pattern for CSR A rows is more efficient than dense scan with branch prediction. Key insight: at 80%+ sparsity, eliminating 80% of loop iterations outweighs the overhead of CSR indirection.
 
 ---
+
+### Experiment 20 — Parallel Merge-Iterate via GCD (PMI-GCD)
+
+- **Tag**: apr07_0116 — Experiment 20 — pending
+- **Algorithm**: Parallelize the row-pair merge-iterate multiply across multiple cores using Apple's Grand Central Dispatch (dispatch_apply). Each thread processes an independent range of A rows, writing to non-overlapping result regions. Combined with dual CSR merge-iterate from exp 19. Small matrices (<100 rows) remain single-threaded to avoid dispatch overhead.
+- **Time Complexity**: Same O(nnz(A) * avg_nnz_per_row(B)) per core, with ~P-way parallelism across P cores.
+- **Pros**: ~4x improvement over exp 19 with 6 threads. No synchronization needed (row groups write to disjoint result regions). Automatic load balancing via GCD thread pool.
+- **Cons**: Thread dispatch overhead for small matrices. Memory bandwidth contention at high thread counts. Not a purely algorithmic improvement.
+- **Result**: 50/50 passed, avg latency 0.2209 ± 0.0060 ms (44540x vs baseline)
+- **Measurement**: 5 runs: [0.23, 0.22, 0.22, 0.22, 0.21] ms.
+- **Variants tested**:
+  - Independent CSR (no merge): 0.978ms (7% worse — merge B-row sharing matters)
+  - Software prefetching: 0.955ms (worse — Apple Silicon has good HW prefetching)
+  - Pre-merged structure: 0.93ms (worse — extra indirection adds cache pressure)
+  - 2 threads: 0.53ms
+  - 4 threads: 0.29ms
+  - 6 threads: 0.22ms ← best
+  - 10 threads: 0.21ms (diminishing returns)
+- **Observation**: Parallel execution dominates all single-threaded algorithmic optimizations at this point. The per-thread work is memory-bandwidth bound, so scaling is sub-linear (6 threads → 4.1x speedup, not 6x). Further gains require either reducing bandwidth per scatter op or deeper algorithmic innovation.
+
+---

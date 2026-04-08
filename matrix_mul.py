@@ -9,33 +9,31 @@ import struct
 _dir = os.path.dirname(os.path.abspath(__file__))
 _lib = ctypes.CDLL(os.path.join(_dir, "sparse_matmul.dylib"))
 
-_lib.sparse_matmul_narrow.restype = None
-_lib.sparse_matmul_narrow.argtypes = [
-    ctypes.c_int, ctypes.c_int, ctypes.c_int,
-    ctypes.c_void_p,
-    ctypes.c_void_p, ctypes.c_void_p, ctypes.c_void_p,
-    ctypes.c_void_p,
-]
-
 _lib.build_compact_csr.restype = ctypes.c_int
 _lib.build_compact_csr.argtypes = [
     ctypes.c_void_p, ctypes.c_int, ctypes.c_int,
     ctypes.c_void_p, ctypes.c_void_p, ctypes.c_void_p,
 ]
 
-_lib.flatten_to_int8.restype = None
-_lib.flatten_to_int8.argtypes = [
-    ctypes.c_void_p, ctypes.c_void_p, ctypes.c_int,
-]
-
 _lib.sparse_matmul_batch.restype = None
 _lib.sparse_matmul_batch.argtypes = [
     ctypes.c_int,
     ctypes.c_void_p, ctypes.c_void_p, ctypes.c_void_p,
-    ctypes.c_void_p, ctypes.c_void_p, ctypes.c_void_p,  # A CSR
-    ctypes.c_void_p, ctypes.c_void_p, ctypes.c_void_p,  # B CSR
-    ctypes.c_void_p,  # result
-    ctypes.c_void_p,  # latencies
+    ctypes.c_void_p, ctypes.c_void_p, ctypes.c_void_p,
+    ctypes.c_void_p, ctypes.c_void_p, ctypes.c_void_p,
+    ctypes.c_void_p,
+    ctypes.c_void_p,
+]
+
+_lib.sparse_matmul_batch_parallel.restype = None
+_lib.sparse_matmul_batch_parallel.argtypes = [
+    ctypes.c_int,
+    ctypes.c_void_p, ctypes.c_void_p, ctypes.c_void_p,
+    ctypes.c_void_p, ctypes.c_void_p, ctypes.c_void_p,
+    ctypes.c_void_p, ctypes.c_void_p, ctypes.c_void_p,
+    ctypes.c_void_p,
+    ctypes.c_void_p,
+    ctypes.c_int,
 ]
 
 _ll_size = struct.calcsize('q')
@@ -117,7 +115,7 @@ def run_batch(cases):
 
     latencies_ns = (ctypes.c_double * n)()
 
-    _lib.sparse_matmul_batch(
+    _lib.sparse_matmul_batch_parallel(
         n,
         ctypes.addressof(all_rows_a),
         ctypes.addressof(all_cols_a),
@@ -130,6 +128,7 @@ def run_batch(cases):
         ctypes.addressof(all_b_vals),
         ctypes.addressof(all_result),
         ctypes.addressof(latencies_ns),
+        6,  # num_threads
     )
 
     return [latencies_ns[i] / 1e6 for i in range(n)]  # ns -> ms
