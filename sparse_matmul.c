@@ -1186,6 +1186,106 @@ static void multiply_dense_blas(
     free(fa); free(fb); free(fc);
 }
 
+/* Convert int8 array to float32 for BLAS */
+void convert_i8_to_f32(const int8_t *src, float *dst, int count) {
+    int i = 0;
+    for (; i + 7 < count; i += 8) {
+        int8x8_t v = vld1_s8(src + i);
+        int16x8_t v16 = vmovl_s8(v);
+        int32x4_t lo = vmovl_s16(vget_low_s16(v16));
+        int32x4_t hi = vmovl_s16(vget_high_s16(v16));
+        vst1q_f32(dst + i, vcvtq_f32_s32(lo));
+        vst1q_f32(dst + i + 4, vcvtq_f32_s32(hi));
+    }
+    for (; i < count; i++) dst[i] = (float)src[i];
+}
+
+/* Dense BLAS multiply with pre-allocated float32 buffers.
+ * Uses cblas_sgemm (AMX-accelerated on Apple Silicon). */
+static void multiply_dense_blas_i32(
+    int rows_a, int cols_a, int cols_b,
+    const float *a_f32,
+    const float *b_f32,
+    float *c_f32,
+    int32_t *result
+) {
+    long long c_size = (long long)rows_a * cols_b;
+
+    cblas_sgemm(CblasRowMajor, CblasNoTrans, CblasNoTrans,
+                rows_a, cols_b, cols_a,
+                1.0f, a_f32, cols_a, b_f32, cols_b,
+                0.0f, c_f32, cols_b);
+
+    /* Convert float32 → int32 with NEON round-to-nearest */
+    long long i = 0;
+    for (; i + 3 < c_size; i += 4) {
+        float32x4_t fv = vld1q_f32(c_f32 + i);
+        int32x4_t iv = vcvtnq_s32_f32(fv);
+        vst1q_s32(result + i, iv);
+    }
+    for (; i < c_size; i++)
+        result[i] = (int32_t)lroundf(c_f32[i]);
+}
+
+/* Batch BLAS multiply — serial */
+void sparse_matmul_batch_blas(
+    int num_cases,
+    const int *all_rows_a,
+    const int *all_cols_a,
+    const int *all_cols_b,
+    const float **all_a_f32,
+    const float **all_b_f32,
+    float **all_c_f32,
+    int32_t **all_result,
+    double *latencies_ns
+) {
+    mach_timebase_info_data_t tb;
+    mach_timebase_info(&tb);
+    double ns_per_tick = (double)tb.numer / (double)tb.denom;
+
+    for (int t = 0; t < num_cases; t++) {
+        uint64_t start = mach_absolute_time();
+
+        multiply_dense_blas_i32(
+            all_rows_a[t], all_cols_a[t], all_cols_b[t],
+            all_a_f32[t], all_b_f32[t], all_c_f32[t], all_result[t]
+        );
+
+        uint64_t end = mach_absolute_time();
+        latencies_ns[t] = (double)(end - start) * ns_per_tick;
+    }
+}
+
+/* Batch BLAS multiply — parallel (BLAS already threads internally) */
+void sparse_matmul_batch_blas_parallel(
+    int num_cases,
+    const int *all_rows_a,
+    const int *all_cols_a,
+    const int *all_cols_b,
+    const float **all_a_f32,
+    const float **all_b_f32,
+    float **all_c_f32,
+    int32_t **all_result,
+    double *latencies_ns,
+    int num_threads
+) {
+    mach_timebase_info_data_t tb;
+    mach_timebase_info(&tb);
+    double ns_per_tick = (double)tb.numer / (double)tb.denom;
+
+    for (int t = 0; t < num_cases; t++) {
+        uint64_t start = mach_absolute_time();
+
+        multiply_dense_blas_i32(
+            all_rows_a[t], all_cols_a[t], all_cols_b[t],
+            all_a_f32[t], all_b_f32[t], all_c_f32[t], all_result[t]
+        );
+
+        uint64_t end = mach_absolute_time();
+        latencies_ns[t] = (double)(end - start) * ns_per_tick;
+    }
+}
+
 /* Batch multiply — serial version with C-side timing */
 void sparse_matmul_batch(
     int num_cases,
