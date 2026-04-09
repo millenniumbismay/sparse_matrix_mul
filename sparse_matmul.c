@@ -4,6 +4,7 @@
 #include <mach/mach_time.h>
 #include <dispatch/dispatch.h>
 #include <Accelerate/Accelerate.h>
+#include <arm_neon.h>
 
 /*
  * Dual CSR Merge-Iterate Row-Pair Multiply (DCSRM-RPI)
@@ -117,6 +118,117 @@ static void multiply_single(
  * Each 4-product sum ≤ 400, so int16 acc holds ~80 iterations (32000/400).
  * int16 NEON ops process 8 values per instruction (vs 4 for int32) → 2x throughput.
  * Flush int16→int32 every 80 iterations. */
+/* Process one tile of TILE_W columns with register-resident int16 accumulator.
+ * TILE_W = 128 uses 16 NEON registers for the accumulator. */
+#define TILE_W 128
+#define TILE_VECS (TILE_W / 8)  /* 16 int16x8 vectors */
+#define FLUSH_INTERVAL 80
+
+static inline void process_tile_neon(
+    int tile_start, int tile_end,
+    int a_start, int a_end,
+    const int16_t * restrict a_colidx,
+    const int8_t * restrict a_vals,
+    const int8_t * restrict b_dense,
+    int cols_b,
+    int32_t * restrict res
+) {
+    int tw = tile_end - tile_start;
+    int tw_vec = tw / 8;
+    int tw_rem = tw & 7;
+
+    /* Register-resident accumulator: up to 16 int16x8 vectors */
+    int16x8_t acc[TILE_VECS];
+    for (int v = 0; v < tw_vec; v++) acc[v] = vdupq_n_s16(0);
+
+    int iters_since_flush = 0;
+    int p = a_start;
+
+    /* 4-way unrolled A entries */
+    for (; p + 3 < a_end; p += 4) {
+        int8x8_t av0 = vdup_n_s8(a_vals[p]);
+        int8x8_t av1 = vdup_n_s8(a_vals[p+1]);
+        int8x8_t av2 = vdup_n_s8(a_vals[p+2]);
+        int8x8_t av3 = vdup_n_s8(a_vals[p+3]);
+        const int8_t *br0 = b_dense + (long long)a_colidx[p]   * cols_b + tile_start;
+        const int8_t *br1 = b_dense + (long long)a_colidx[p+1] * cols_b + tile_start;
+        const int8_t *br2 = b_dense + (long long)a_colidx[p+2] * cols_b + tile_start;
+        const int8_t *br3 = b_dense + (long long)a_colidx[p+3] * cols_b + tile_start;
+
+        for (int v = 0; v < tw_vec; v++) {
+            int off = v * 8;
+            acc[v] = vmlal_s8(acc[v], av0, vld1_s8(br0 + off));
+            acc[v] = vmlal_s8(acc[v], av1, vld1_s8(br1 + off));
+            acc[v] = vmlal_s8(acc[v], av2, vld1_s8(br2 + off));
+            acc[v] = vmlal_s8(acc[v], av3, vld1_s8(br3 + off));
+        }
+
+        iters_since_flush++;
+        if (iters_since_flush >= FLUSH_INTERVAL) {
+            int32_t *rp = res + tile_start;
+            for (int v = 0; v < tw_vec; v++) {
+                int off = v * 8;
+                int32x4_t lo = vld1q_s32(rp + off);
+                int32x4_t hi = vld1q_s32(rp + off + 4);
+                lo = vaddw_s16(lo, vget_low_s16(acc[v]));
+                hi = vaddw_s16(hi, vget_high_s16(acc[v]));
+                vst1q_s32(rp + off, lo);
+                vst1q_s32(rp + off + 4, hi);
+                acc[v] = vdupq_n_s16(0);
+            }
+            iters_since_flush = 0;
+        }
+    }
+
+    /* Scalar remainder for leftover A entries */
+    for (; p < a_end; p++) {
+        int8x8_t av = vdup_n_s8(a_vals[p]);
+        const int8_t *br = b_dense + (long long)a_colidx[p] * cols_b + tile_start;
+        for (int v = 0; v < tw_vec; v++) {
+            acc[v] = vmlal_s8(acc[v], av, vld1_s8(br + v * 8));
+        }
+        iters_since_flush++;
+    }
+
+    /* Final flush: widen int16 → int32 and add to result */
+    if (iters_since_flush > 0) {
+        int32_t *rp = res + tile_start;
+        for (int v = 0; v < tw_vec; v++) {
+            int off = v * 8;
+            int32x4_t lo = vld1q_s32(rp + off);
+            int32x4_t hi = vld1q_s32(rp + off + 4);
+            lo = vaddw_s16(lo, vget_low_s16(acc[v]));
+            hi = vaddw_s16(hi, vget_high_s16(acc[v]));
+            vst1q_s32(rp + off, lo);
+            vst1q_s32(rp + off + 4, hi);
+        }
+    }
+
+    /* Handle remaining columns (< 8) with scalar */
+    if (tw_rem > 0) {
+        int j_start = tile_start + tw_vec * 8;
+        int16_t sc_acc[8] = {0};
+        int sp = a_start;
+        int sc_flush = 0;
+        for (; sp < a_end; sp++) {
+            int16_t av = (int16_t)a_vals[sp];
+            const int8_t *br = b_dense + (long long)a_colidx[sp] * cols_b;
+            for (int j = 0; j < tw_rem; j++)
+                sc_acc[j] += av * (int16_t)br[j_start + j];
+            sc_flush++;
+            if (sc_flush >= FLUSH_INTERVAL * 4) {
+                for (int j = 0; j < tw_rem; j++) {
+                    res[j_start + j] += (int32_t)sc_acc[j];
+                    sc_acc[j] = 0;
+                }
+                sc_flush = 0;
+            }
+        }
+        for (int j = 0; j < tw_rem; j++)
+            res[j_start + j] += (int32_t)sc_acc[j];
+    }
+}
+
 static void multiply_dense_axpy(
     int rows_a, int cols_a, int cols_b,
     const int * restrict a_rowptr, const int16_t * restrict a_colidx,
@@ -124,9 +236,6 @@ static void multiply_dense_axpy(
     const int8_t * restrict b_dense,
     int32_t * restrict result
 ) {
-    int16_t *acc16 = (int16_t *)malloc((long long)cols_b * sizeof(int16_t));
-    const int FLUSH_INTERVAL = 80; /* 80 × 400 = 32000, within int16 ±32767 */
-
     for (int i = 0; i < rows_a; i++) {
         int32_t * restrict res = result + (long long)i * cols_b;
         int a_start = a_rowptr[i];
@@ -134,51 +243,20 @@ static void multiply_dense_axpy(
         memset(res, 0, (long long)cols_b * sizeof(int32_t));
         if (a_start == a_end) continue;
 
-        memset(acc16, 0, (long long)cols_b * sizeof(int16_t));
-        int p = a_start;
-        int iters_since_flush = 0;
-
-        for (; p + 3 < a_end; p += 4) {
-            int16_t av0 = (int16_t)a_vals[p],   av1 = (int16_t)a_vals[p+1];
-            int16_t av2 = (int16_t)a_vals[p+2], av3 = (int16_t)a_vals[p+3];
-            const int8_t * restrict br0 = b_dense + (long long)a_colidx[p]   * cols_b;
-            const int8_t * restrict br1 = b_dense + (long long)a_colidx[p+1] * cols_b;
-            const int8_t * restrict br2 = b_dense + (long long)a_colidx[p+2] * cols_b;
-            const int8_t * restrict br3 = b_dense + (long long)a_colidx[p+3] * cols_b;
-            for (int j = 0; j < cols_b; j++) {
-                acc16[j] += av0*(int16_t)br0[j] + av1*(int16_t)br1[j]
-                          + av2*(int16_t)br2[j] + av3*(int16_t)br3[j];
-            }
-            iters_since_flush++;
-            if (iters_since_flush >= FLUSH_INTERVAL) {
-                for (int j = 0; j < cols_b; j++) {
-                    res[j] += (int32_t)acc16[j];
-                    acc16[j] = 0;
-                }
-                iters_since_flush = 0;
-            }
+        /* Process columns in tiles of TILE_W with register-resident accumulator */
+        int j;
+        for (j = 0; j + TILE_W <= cols_b; j += TILE_W) {
+            process_tile_neon(j, j + TILE_W, a_start, a_end,
+                            a_colidx, a_vals, b_dense, cols_b, res);
         }
-
-        for (; p < a_end; p++) {
-            int16_t av = (int16_t)a_vals[p];
-            const int8_t * restrict b_row = b_dense + (long long)a_colidx[p] * cols_b;
-            for (int j = 0; j < cols_b; j++) {
-                acc16[j] += av * (int16_t)b_row[j];
-            }
-            iters_since_flush++;
-        }
-
-        /* Final flush */
-        if (iters_since_flush > 0) {
-            for (int j = 0; j < cols_b; j++) {
-                res[j] += (int32_t)acc16[j];
-            }
+        if (j < cols_b) {
+            process_tile_neon(j, cols_b, a_start, a_end,
+                            a_colidx, a_vals, b_dense, cols_b, res);
         }
     }
-    free(acc16);
 }
 
-/* Dense multi-axpy row-range for parallel dispatch — int16 intermediate */
+/* Dense multi-axpy row-range for parallel dispatch — NEON register-tiled */
 static void multiply_dense_axpy_range(
     int row_start, int row_end, int cols_a, int cols_b,
     const int * restrict a_rowptr, const int16_t * restrict a_colidx,
@@ -186,9 +264,6 @@ static void multiply_dense_axpy_range(
     const int8_t * restrict b_dense,
     int32_t * restrict result
 ) {
-    int16_t *acc16 = (int16_t *)malloc((long long)cols_b * sizeof(int16_t));
-    const int FLUSH_INTERVAL = 80;
-
     for (int i = row_start; i < row_end; i++) {
         int32_t * restrict res = result + (long long)i * cols_b;
         int a_start = a_rowptr[i];
@@ -196,47 +271,16 @@ static void multiply_dense_axpy_range(
         memset(res, 0, (long long)cols_b * sizeof(int32_t));
         if (a_start == a_end) continue;
 
-        memset(acc16, 0, (long long)cols_b * sizeof(int16_t));
-        int p = a_start;
-        int iters_since_flush = 0;
-
-        for (; p + 3 < a_end; p += 4) {
-            int16_t av0 = (int16_t)a_vals[p],   av1 = (int16_t)a_vals[p+1];
-            int16_t av2 = (int16_t)a_vals[p+2], av3 = (int16_t)a_vals[p+3];
-            const int8_t * restrict br0 = b_dense + (long long)a_colidx[p]   * cols_b;
-            const int8_t * restrict br1 = b_dense + (long long)a_colidx[p+1] * cols_b;
-            const int8_t * restrict br2 = b_dense + (long long)a_colidx[p+2] * cols_b;
-            const int8_t * restrict br3 = b_dense + (long long)a_colidx[p+3] * cols_b;
-            for (int j = 0; j < cols_b; j++) {
-                acc16[j] += av0*(int16_t)br0[j] + av1*(int16_t)br1[j]
-                          + av2*(int16_t)br2[j] + av3*(int16_t)br3[j];
-            }
-            iters_since_flush++;
-            if (iters_since_flush >= FLUSH_INTERVAL) {
-                for (int j = 0; j < cols_b; j++) {
-                    res[j] += (int32_t)acc16[j];
-                    acc16[j] = 0;
-                }
-                iters_since_flush = 0;
-            }
+        int j;
+        for (j = 0; j + TILE_W <= cols_b; j += TILE_W) {
+            process_tile_neon(j, j + TILE_W, a_start, a_end,
+                            a_colidx, a_vals, b_dense, cols_b, res);
         }
-
-        for (; p < a_end; p++) {
-            int16_t av = (int16_t)a_vals[p];
-            const int8_t * restrict b_row = b_dense + (long long)a_colidx[p] * cols_b;
-            for (int j = 0; j < cols_b; j++) {
-                acc16[j] += av * (int16_t)b_row[j];
-            }
-            iters_since_flush++;
-        }
-
-        if (iters_since_flush > 0) {
-            for (int j = 0; j < cols_b; j++) {
-                res[j] += (int32_t)acc16[j];
-            }
+        if (j < cols_b) {
+            process_tile_neon(j, cols_b, a_start, a_end,
+                            a_colidx, a_vals, b_dense, cols_b, res);
         }
     }
-    free(acc16);
 }
 
 /* Experiment 22: Row-reordered nomerge with B-data L1 locality.
