@@ -113,6 +113,77 @@ static void multiply_single(
     }
 }
 
+/* Experiment 23: Dense B + int32 axpy accumulation.
+ * Instead of sparse scatter (res[b_colidx[bj]] += av * b_vals[bj]),
+ * use sequential axpy: acc[j] += av * B_dense[k*N + j] for all j.
+ *
+ * Analysis: dense does 7.2x more ops across all 50 test cases, but each
+ * op is sequential → NEON auto-vectorizes to 16 int8 MACs/instruction.
+ * Effective ratio = 7.2/16 = 0.45x → ~2.2x fewer effective ops.
+ * Plus: zero cache misses on result array (sequential writes). */
+static void multiply_dense_axpy(
+    int rows_a, int cols_a, int cols_b,
+    const int *a_rowptr, const int16_t *a_colidx, const int8_t *a_vals,
+    const int8_t *b_dense,   /* B stored as dense int8, row-major */
+    long long *result
+) {
+    int32_t *acc = (int32_t *)malloc((long long)cols_b * sizeof(int32_t));
+
+    for (int i = 0; i < rows_a; i++) {
+        memset(acc, 0, (long long)cols_b * sizeof(int32_t));
+
+        int a_start = a_rowptr[i];
+        int a_end = a_rowptr[i + 1];
+        for (int p = a_start; p < a_end; p++) {
+            int32_t av = (int32_t)a_vals[p];
+            int k = a_colidx[p];
+            const int8_t *b_row = b_dense + (long long)k * cols_b;
+            /* Sequential axpy — auto-vectorized by clang to NEON */
+            for (int j = 0; j < cols_b; j++) {
+                acc[j] += av * (int32_t)b_row[j];
+            }
+        }
+
+        /* Widen int32 → int64 (sequential, NEON auto-vectorizable) */
+        long long *res = result + (long long)i * cols_b;
+        for (int j = 0; j < cols_b; j++) {
+            res[j] = (long long)acc[j];
+        }
+    }
+    free(acc);
+}
+
+/* Dense axpy row-range for parallel dispatch */
+static void multiply_dense_axpy_range(
+    int row_start, int row_end, int cols_a, int cols_b,
+    const int *a_rowptr, const int16_t *a_colidx, const int8_t *a_vals,
+    const int8_t *b_dense,
+    long long *result
+) {
+    int32_t *acc = (int32_t *)malloc((long long)cols_b * sizeof(int32_t));
+
+    for (int i = row_start; i < row_end; i++) {
+        memset(acc, 0, (long long)cols_b * sizeof(int32_t));
+
+        int a_start = a_rowptr[i];
+        int a_end = a_rowptr[i + 1];
+        for (int p = a_start; p < a_end; p++) {
+            int32_t av = (int32_t)a_vals[p];
+            int k = a_colidx[p];
+            const int8_t *b_row = b_dense + (long long)k * cols_b;
+            for (int j = 0; j < cols_b; j++) {
+                acc[j] += av * (int32_t)b_row[j];
+            }
+        }
+
+        long long *res = result + (long long)i * cols_b;
+        for (int j = 0; j < cols_b; j++) {
+            res[j] = (long long)acc[j];
+        }
+    }
+    free(acc);
+}
+
 /* Experiment 22: Row-reordered nomerge with B-data L1 locality.
  * Sort A rows by their first non-zero column so consecutive processed
  * rows access similar B-rows, improving L1 cache reuse.
@@ -1187,6 +1258,99 @@ void sparse_matmul_batch_hybrid(
         /* Use dense BLAS for the multiply */
         multiply_dense_blas(rows_a, cols_a, cols_b,
                           all_a_i8[t], all_b_i8[t], result);
+
+        uint64_t end = mach_absolute_time();
+        latencies_ns[t] = (double)(end - start) * ns_per_tick;
+    }
+}
+
+/* Batch dense axpy multiply — serial */
+void sparse_matmul_batch_dense_axpy(
+    int num_cases,
+    const int *all_rows_a,
+    const int *all_cols_a,
+    const int *all_cols_b,
+    const int **all_a_rowptr,
+    const int16_t **all_a_colidx,
+    const int8_t **all_a_vals,
+    const int8_t **all_b_i8,
+    long long **all_result,
+    double *latencies_ns
+) {
+    mach_timebase_info_data_t tb;
+    mach_timebase_info(&tb);
+    double ns_per_tick = (double)tb.numer / (double)tb.denom;
+
+    for (int t = 0; t < num_cases; t++) {
+        uint64_t start = mach_absolute_time();
+
+        multiply_dense_axpy(
+            all_rows_a[t], all_cols_a[t], all_cols_b[t],
+            all_a_rowptr[t], all_a_colidx[t], all_a_vals[t],
+            all_b_i8[t], all_result[t]
+        );
+
+        uint64_t end = mach_absolute_time();
+        latencies_ns[t] = (double)(end - start) * ns_per_tick;
+    }
+}
+
+/* Batch dense axpy multiply — parallel (GCD) */
+void sparse_matmul_batch_dense_axpy_parallel(
+    int num_cases,
+    const int *all_rows_a,
+    const int *all_cols_a,
+    const int *all_cols_b,
+    const int **all_a_rowptr,
+    const int16_t **all_a_colidx,
+    const int8_t **all_a_vals,
+    const int8_t **all_b_i8,
+    long long **all_result,
+    double *latencies_ns,
+    int num_threads
+) {
+    mach_timebase_info_data_t tb;
+    mach_timebase_info(&tb);
+    double ns_per_tick = (double)tb.numer / (double)tb.denom;
+
+    dispatch_queue_t queue = dispatch_get_global_queue(QOS_CLASS_USER_INTERACTIVE, 0);
+
+    for (int t = 0; t < num_cases; t++) {
+        int rows_a = all_rows_a[t];
+        int cols_a = all_cols_a[t];
+        int cols_b = all_cols_b[t];
+        const int *a_rowptr = all_a_rowptr[t];
+        const int16_t *a_colidx = all_a_colidx[t];
+        const int8_t *a_vals = all_a_vals[t];
+        const int8_t *b_dense = all_b_i8[t];
+        long long *result = all_result[t];
+
+        if (rows_a < 100 || num_threads <= 1) {
+            uint64_t start = mach_absolute_time();
+            multiply_dense_axpy(rows_a, cols_a, cols_b,
+                              a_rowptr, a_colidx, a_vals,
+                              b_dense, result);
+            uint64_t end = mach_absolute_time();
+            latencies_ns[t] = (double)(end - start) * ns_per_tick;
+            continue;
+        }
+
+        int rows_per_task = 20;
+        int num_tasks = (rows_a + rows_per_task - 1) / rows_per_task;
+        if (num_tasks < num_threads) num_tasks = num_threads;
+
+        uint64_t start = mach_absolute_time();
+
+        dispatch_apply(num_tasks, queue, ^(size_t tid) {
+            int rs = (int)tid * rows_per_task;
+            int re = rs + rows_per_task;
+            if (re > rows_a) re = rows_a;
+            if (rs < re) {
+                multiply_dense_axpy_range(rs, re, cols_a, cols_b,
+                                        a_rowptr, a_colidx, a_vals,
+                                        b_dense, result);
+            }
+        });
 
         uint64_t end = mach_absolute_time();
         latencies_ns[t] = (double)(end - start) * ns_per_tick;

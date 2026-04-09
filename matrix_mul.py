@@ -147,6 +147,27 @@ _lib.sparse_matmul_batch_nomerge_i32.argtypes = [
     ctypes.c_void_p,
 ]
 
+_lib.sparse_matmul_batch_dense_axpy.restype = None
+_lib.sparse_matmul_batch_dense_axpy.argtypes = [
+    ctypes.c_int,
+    ctypes.c_void_p, ctypes.c_void_p, ctypes.c_void_p,
+    ctypes.c_void_p, ctypes.c_void_p, ctypes.c_void_p,
+    ctypes.c_void_p,  # b_i8
+    ctypes.c_void_p,
+    ctypes.c_void_p,
+]
+
+_lib.sparse_matmul_batch_dense_axpy_parallel.restype = None
+_lib.sparse_matmul_batch_dense_axpy_parallel.argtypes = [
+    ctypes.c_int,
+    ctypes.c_void_p, ctypes.c_void_p, ctypes.c_void_p,
+    ctypes.c_void_p, ctypes.c_void_p, ctypes.c_void_p,
+    ctypes.c_void_p,  # b_i8
+    ctypes.c_void_p,
+    ctypes.c_void_p,
+    ctypes.c_int,
+]
+
 _lib.sparse_matmul_batch_hybrid.restype = None
 _lib.sparse_matmul_batch_hybrid.argtypes = [
     ctypes.c_int,
@@ -446,6 +467,43 @@ def run_batch(cases, method="serial"):
             ctypes.addressof(all_result),
             ctypes.addressof(latencies_ns),
         )
+    elif method == "dense_axpy":
+        all_a_rowptr = PtrArray(*(tc["a_rowptr"].buffer_info()[0] for tc in cases))
+        all_a_colidx = PtrArray(*(ctypes.cast(tc["a_colidx"].buffer_info()[0], ctypes.c_void_p).value for tc in cases))
+        all_a_vals = PtrArray(*(ctypes.addressof(tc["a_vals"]) for tc in cases))
+        all_b_i8 = PtrArray(*(ctypes.addressof(tc["b_i8"]) for tc in cases))
+
+        _lib.sparse_matmul_batch_dense_axpy(
+            n,
+            ctypes.addressof(all_rows_a),
+            ctypes.addressof(all_cols_a),
+            ctypes.addressof(all_cols_b),
+            ctypes.addressof(all_a_rowptr),
+            ctypes.addressof(all_a_colidx),
+            ctypes.addressof(all_a_vals),
+            ctypes.addressof(all_b_i8),
+            ctypes.addressof(all_result),
+            ctypes.addressof(latencies_ns),
+        )
+    elif method == "dense_axpy_parallel":
+        all_a_rowptr = PtrArray(*(tc["a_rowptr"].buffer_info()[0] for tc in cases))
+        all_a_colidx = PtrArray(*(ctypes.cast(tc["a_colidx"].buffer_info()[0], ctypes.c_void_p).value for tc in cases))
+        all_a_vals = PtrArray(*(ctypes.addressof(tc["a_vals"]) for tc in cases))
+        all_b_i8 = PtrArray(*(ctypes.addressof(tc["b_i8"]) for tc in cases))
+
+        _lib.sparse_matmul_batch_dense_axpy_parallel(
+            n,
+            ctypes.addressof(all_rows_a),
+            ctypes.addressof(all_cols_a),
+            ctypes.addressof(all_cols_b),
+            ctypes.addressof(all_a_rowptr),
+            ctypes.addressof(all_a_colidx),
+            ctypes.addressof(all_a_vals),
+            ctypes.addressof(all_b_i8),
+            ctypes.addressof(all_result),
+            ctypes.addressof(latencies_ns),
+            6,
+        )
     elif method == "parallel":
         all_a_rowptr = PtrArray(*(tc["a_rowptr"].buffer_info()[0] for tc in cases))
         all_a_colidx = PtrArray(*(ctypes.cast(tc["a_colidx"].buffer_info()[0], ctypes.c_void_p).value for tc in cases))
@@ -517,8 +575,8 @@ def main():
     cases = load_test_cases()
 
     # Always run both serial (core algorithm) and parallel
-    serial_mean, serial_std, serial_latencies = run_experiment(cases, method="serial")
-    parallel_mean, parallel_std, parallel_latencies = run_experiment(cases, method="parallel")
+    serial_mean, serial_std, serial_latencies = run_experiment(cases, method="dense_axpy")
+    parallel_mean, parallel_std, parallel_latencies = run_experiment(cases, method="dense_axpy_parallel")
 
     # Use serial run for correctness checking (algorithm is identical)
     for i, tc in enumerate(cases):
