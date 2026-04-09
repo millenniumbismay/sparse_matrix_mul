@@ -257,3 +257,23 @@
 - **Observation**: The outer product approach reduces total B-row data loads but the scattered writes to different result rows cause L1 thrashing. Row-blocking M>2 adds merge overhead that exceeds B-row sharing benefit. The merge-iterate pair is near-optimal: it balances B-row sharing, merge simplicity, and result cache locality. Per-pair zeroing ensures result rows are L1-hot. Serial algorithm approaches asymptotic optimality.
 
 ---
+
+### Experiment 22 — Simplification: Remove Merge-Iterate (NOMERGE)
+
+- **Tag**: apr07_0116 — Experiment 22 — pending
+- **Algorithm**: Remove the merge-iterate row-pair logic entirely. Process each row independently with a simple nested loop (iterate A's CSR entries, scatter B-row entries to result). Per-row memset zeroing.
+- **Time Complexity**: Same O(nnz(A) * avg_nnz_per_row(B)), slightly more B-row loads (no sharing), but fewer cycles per iteration.
+- **Pros**: 2% serial improvement, 5% parallel improvement. Much simpler code (~80 fewer lines). Lower variance. Better branch prediction (only loop back-edges, no 3-way conditionals).
+- **Cons**: Loses B-row temporal reuse for shared columns across row pairs (~7% more B-row loads), but this is more than offset by eliminating merge overhead.
+- **Result**: 50/50 passed, serial 0.8942 ± 0.0203 ms, parallel 0.1999 ± 0.0106 ms
+- **Variants tested during exp 22**:
+  - int32 accumulator + merge: 0.9058ms (no gain — cache-line granularity makes int32/int64 scatter equivalent for random access)
+  - int32 accumulator + nomerge: 0.8938ms (marginal, malloc overhead offsets memset savings)
+  - Pre-classified merge-iterate (PCMI): 0.9521ms (6% WORSE — classification overhead exceeds branch prediction savings)
+  - Radix counting-sort accumulation: 5.2384ms (5.8x WORSE — sort overhead dominates)
+  - Dense BLAS via AMX (cblas_sgemm): 0.9162ms (equal — conversion overhead offsets AMX speed at 15% density)
+  - Row-reordered for B-data L1 locality: 0.9735ms (8% WORSE — random result writes hurt more than B-locality gains)
+  - Compiler flags (-flto, -Ofast): no improvement over -O3 -march=native
+- **Observation**: At 15% density with ~500×500 matrices, the scatter-based accumulation is at ~70% of Apple M-series theoretical throughput (2 scatter ops/cycle from 2 load + 2 store ports). The merge-iterate's 3-way branch misprediction cost (~15 cycles × ~30% misprediction rate × 200 merge steps = ~990 cycles/pair) exceeds the B-row sharing benefit (~605 cycles/pair). Simpler code wins. The algorithm is now memory-bandwidth bound at the L1 level — further serial improvement requires reducing total scatter operations, which is bounded by O(nnz_A × avg_nnz_per_row_B).
+
+---

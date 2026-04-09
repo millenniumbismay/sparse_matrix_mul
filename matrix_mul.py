@@ -99,6 +99,54 @@ _lib.sparse_matmul_batch_parallel.argtypes = [
     ctypes.c_int,
 ]
 
+_lib.build_row_order.restype = None
+_lib.build_row_order.argtypes = [
+    ctypes.c_int,
+    ctypes.c_void_p, ctypes.c_void_p,
+    ctypes.c_void_p,
+]
+
+_lib.sparse_matmul_batch_reordered.restype = None
+_lib.sparse_matmul_batch_reordered.argtypes = [
+    ctypes.c_int,
+    ctypes.c_void_p, ctypes.c_void_p, ctypes.c_void_p,
+    ctypes.c_void_p, ctypes.c_void_p, ctypes.c_void_p,
+    ctypes.c_void_p, ctypes.c_void_p, ctypes.c_void_p,
+    ctypes.c_void_p,
+    ctypes.c_void_p,
+    ctypes.c_void_p,
+]
+
+_lib.sparse_matmul_batch_pcmi.restype = None
+_lib.sparse_matmul_batch_pcmi.argtypes = [
+    ctypes.c_int,
+    ctypes.c_void_p, ctypes.c_void_p, ctypes.c_void_p,
+    ctypes.c_void_p, ctypes.c_void_p, ctypes.c_void_p,
+    ctypes.c_void_p, ctypes.c_void_p, ctypes.c_void_p,
+    ctypes.c_void_p,
+    ctypes.c_void_p,
+]
+
+_lib.sparse_matmul_batch_i32.restype = None
+_lib.sparse_matmul_batch_i32.argtypes = [
+    ctypes.c_int,
+    ctypes.c_void_p, ctypes.c_void_p, ctypes.c_void_p,
+    ctypes.c_void_p, ctypes.c_void_p, ctypes.c_void_p,
+    ctypes.c_void_p, ctypes.c_void_p, ctypes.c_void_p,
+    ctypes.c_void_p,
+    ctypes.c_void_p,
+]
+
+_lib.sparse_matmul_batch_nomerge_i32.restype = None
+_lib.sparse_matmul_batch_nomerge_i32.argtypes = [
+    ctypes.c_int,
+    ctypes.c_void_p, ctypes.c_void_p, ctypes.c_void_p,
+    ctypes.c_void_p, ctypes.c_void_p, ctypes.c_void_p,
+    ctypes.c_void_p, ctypes.c_void_p, ctypes.c_void_p,
+    ctypes.c_void_p,
+    ctypes.c_void_p,
+]
+
 _lib.sparse_matmul_batch_hybrid.restype = None
 _lib.sparse_matmul_batch_hybrid.argtypes = [
     ctypes.c_int,
@@ -180,6 +228,15 @@ def load_test_cases(path="test_cases.txt"):
             # Pre-allocate result buffer
             result_buf = array.array('q', bytes(m * y * _ll_size))
 
+            # Pre-compute row ordering for B-data locality
+            row_order = array.array('i', bytes(m * 4))
+            _lib.build_row_order(
+                m,
+                a_rowptr.buffer_info()[0],
+                ctypes.cast(a_colidx.buffer_info()[0], ctypes.c_void_p),
+                row_order.buffer_info()[0],
+            )
+
             cases.append({
                 "name": f"test_{test_id}",
                 "rows_a": m, "cols_a": n, "cols_b": y,
@@ -187,6 +244,7 @@ def load_test_cases(path="test_cases.txt"):
                 "a_rowptr": a_rowptr, "a_colidx": a_colidx, "a_vals": a_vals,
                 "a_colptr": a_colptr, "a_rowidx": a_rowidx, "a_vals_csc": a_vals_csc,
                 "b_rowptr": b_rowptr, "b_colidx": b_colidx, "b_vals": b_vals,
+                "row_order": row_order,
                 "result_buf": result_buf,
                 "expected": exp_flat,
             })
@@ -309,6 +367,84 @@ def run_batch(cases, method="serial"):
             ctypes.addressof(all_result),
             ctypes.addressof(latencies_ns),
             block_size,
+        )
+    elif method == "reordered":
+        all_a_rowptr = PtrArray(*(tc["a_rowptr"].buffer_info()[0] for tc in cases))
+        all_a_colidx = PtrArray(*(ctypes.cast(tc["a_colidx"].buffer_info()[0], ctypes.c_void_p).value for tc in cases))
+        all_a_vals = PtrArray(*(ctypes.addressof(tc["a_vals"]) for tc in cases))
+        all_row_orders = PtrArray(*(tc["row_order"].buffer_info()[0] for tc in cases))
+
+        _lib.sparse_matmul_batch_reordered(
+            n,
+            ctypes.addressof(all_rows_a),
+            ctypes.addressof(all_cols_a),
+            ctypes.addressof(all_cols_b),
+            ctypes.addressof(all_a_rowptr),
+            ctypes.addressof(all_a_colidx),
+            ctypes.addressof(all_a_vals),
+            ctypes.addressof(all_b_rowptr),
+            ctypes.addressof(all_b_colidx),
+            ctypes.addressof(all_b_vals),
+            ctypes.addressof(all_result),
+            ctypes.addressof(latencies_ns),
+            ctypes.addressof(all_row_orders),
+        )
+    elif method == "pcmi":
+        all_a_rowptr = PtrArray(*(tc["a_rowptr"].buffer_info()[0] for tc in cases))
+        all_a_colidx = PtrArray(*(ctypes.cast(tc["a_colidx"].buffer_info()[0], ctypes.c_void_p).value for tc in cases))
+        all_a_vals = PtrArray(*(ctypes.addressof(tc["a_vals"]) for tc in cases))
+
+        _lib.sparse_matmul_batch_pcmi(
+            n,
+            ctypes.addressof(all_rows_a),
+            ctypes.addressof(all_cols_a),
+            ctypes.addressof(all_cols_b),
+            ctypes.addressof(all_a_rowptr),
+            ctypes.addressof(all_a_colidx),
+            ctypes.addressof(all_a_vals),
+            ctypes.addressof(all_b_rowptr),
+            ctypes.addressof(all_b_colidx),
+            ctypes.addressof(all_b_vals),
+            ctypes.addressof(all_result),
+            ctypes.addressof(latencies_ns),
+        )
+    elif method == "i32":
+        all_a_rowptr = PtrArray(*(tc["a_rowptr"].buffer_info()[0] for tc in cases))
+        all_a_colidx = PtrArray(*(ctypes.cast(tc["a_colidx"].buffer_info()[0], ctypes.c_void_p).value for tc in cases))
+        all_a_vals = PtrArray(*(ctypes.addressof(tc["a_vals"]) for tc in cases))
+
+        _lib.sparse_matmul_batch_i32(
+            n,
+            ctypes.addressof(all_rows_a),
+            ctypes.addressof(all_cols_a),
+            ctypes.addressof(all_cols_b),
+            ctypes.addressof(all_a_rowptr),
+            ctypes.addressof(all_a_colidx),
+            ctypes.addressof(all_a_vals),
+            ctypes.addressof(all_b_rowptr),
+            ctypes.addressof(all_b_colidx),
+            ctypes.addressof(all_b_vals),
+            ctypes.addressof(all_result),
+            ctypes.addressof(latencies_ns),
+        )
+    elif method == "nomerge_i32":
+        all_a_rowptr = PtrArray(*(tc["a_rowptr"].buffer_info()[0] for tc in cases))
+        all_a_colidx = PtrArray(*(ctypes.cast(tc["a_colidx"].buffer_info()[0], ctypes.c_void_p).value for tc in cases))
+        all_a_vals = PtrArray(*(ctypes.addressof(tc["a_vals"]) for tc in cases))
+
+        _lib.sparse_matmul_batch_nomerge_i32(
+            n,
+            ctypes.addressof(all_rows_a),
+            ctypes.addressof(all_cols_a),
+            ctypes.addressof(all_cols_b),
+            ctypes.addressof(all_a_rowptr),
+            ctypes.addressof(all_a_colidx),
+            ctypes.addressof(all_a_vals),
+            ctypes.addressof(all_b_rowptr),
+            ctypes.addressof(all_b_colidx),
+            ctypes.addressof(all_b_vals),
+            ctypes.addressof(all_result),
+            ctypes.addressof(latencies_ns),
         )
     elif method == "parallel":
         all_a_rowptr = PtrArray(*(tc["a_rowptr"].buffer_info()[0] for tc in cases))

@@ -14,3 +14,4 @@ apr07_0116	18	pending	50/50	1.0287 ms	—	keep	pre-alloc result + direct C call 
 apr07_0116	19	pending	50/50	0.9112 ms	—	keep	dual CSR merge multiply + batch C call — skip zero A entries, merge row-pairs, 12% faster
 apr07_0116	20	pending	50/50	0.9112 ms	0.2209 ms	keep	parallel GCD merge-iterate (6 threads) — 4.1x speedup from multi-core, 44540x vs baseline
 apr07_0116	21	pending	50/50	0.9115 ms	0.2100 ms	keep	per-pair lazy zeroing — L1-hot result rows, 8% serial improvement, 10791x vs baseline
+apr07_0116	22	pending	50/50	0.8942 ms	0.1999 ms	keep	simplification: remove merge-iterate, use independent row processing — 2% serial, 5% parallel improvement from eliminated branch mispredictions
