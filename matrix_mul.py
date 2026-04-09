@@ -246,8 +246,9 @@ def load_test_cases(path="test_cases.txt"):
             _lib.flatten_to_int8(a_flat.buffer_info()[0], ctypes.addressof(a_i8), m * n)
             b_i8 = (ctypes.c_int8 * (n2 * y))()
             _lib.flatten_to_int8(b_flat.buffer_info()[0], ctypes.addressof(b_i8), n2 * y)
-            # Pre-allocate result buffer
+            # Pre-allocate result buffers (int32 for dense_axpy, int64 for legacy)
             result_buf = array.array('q', bytes(m * y * _ll_size))
+            result_buf_i32 = array.array('i', bytes(m * y * 4))
 
             # Pre-compute row ordering for B-data locality
             row_order = array.array('i', bytes(m * 4))
@@ -258,6 +259,9 @@ def load_test_cases(path="test_cases.txt"):
                 row_order.buffer_info()[0],
             )
 
+            # Pre-compute int32 expected values for comparison
+            exp_i32 = array.array('i', (int(v) for v in exp_flat))
+
             cases.append({
                 "name": f"test_{test_id}",
                 "rows_a": m, "cols_a": n, "cols_b": y,
@@ -267,7 +271,9 @@ def load_test_cases(path="test_cases.txt"):
                 "b_rowptr": b_rowptr, "b_colidx": b_colidx, "b_vals": b_vals,
                 "row_order": row_order,
                 "result_buf": result_buf,
+                "result_buf_i32": result_buf_i32,
                 "expected": exp_flat,
+                "expected_i32": exp_i32,
             })
     return cases
 
@@ -286,7 +292,8 @@ def run_batch(cases, method="serial"):
     all_b_rowptr = PtrArray(*(tc["b_rowptr"].buffer_info()[0] for tc in cases))
     all_b_colidx = PtrArray(*(ctypes.cast(tc["b_colidx"].buffer_info()[0], ctypes.c_void_p).value for tc in cases))
     all_b_vals = PtrArray(*(ctypes.addressof(tc["b_vals"]) for tc in cases))
-    all_result = PtrArray(*(tc["result_buf"].buffer_info()[0] for tc in cases))
+    use_i32 = method in ("dense_axpy", "dense_axpy_parallel")
+    all_result = PtrArray(*(tc["result_buf_i32" if use_i32 else "result_buf"].buffer_info()[0] for tc in cases))
 
     latencies_ns = (ctypes.c_double * n)()
 
@@ -578,15 +585,15 @@ def main():
     serial_mean, serial_std, serial_latencies = run_experiment(cases, method="dense_axpy")
     parallel_mean, parallel_std, parallel_latencies = run_experiment(cases, method="dense_axpy_parallel")
 
-    # Use serial run for correctness checking (algorithm is identical)
+    # Use serial run for correctness checking (int32 result vs int32 expected)
     for i, tc in enumerate(cases):
         name = tc["name"]
-        rb = tc["result_buf"]
+        rb = tc["result_buf_i32"]
         s_lat = serial_latencies[i]
         p_lat = parallel_latencies[i]
 
         try:
-            assert rb == tc["expected"], "Output mismatch"
+            assert rb == tc["expected_i32"], "Output mismatch"
             solution = "correct"
             observation = "Output matches expected result"
             log(f"  PASS  {name} (serial: {s_lat:.4f} ms, parallel: {p_lat:.4f} ms)", log_file)

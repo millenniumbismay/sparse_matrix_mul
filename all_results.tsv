@@ -17,3 +17,4 @@ apr07_0116	21	pending	50/50	0.9115 ms	0.2100 ms	keep	per-pair lazy zeroing — L
 apr07_0116	22	pending	50/50	0.8942 ms	0.1999 ms	keep	simplification: remove merge-iterate, use independent row processing — 2% serial, 5% parallel improvement from eliminated branch mispredictions
 apr07_0116	23	pending	50/50	0.7824 ms	0.2085 ms	keep	dense B axpy + int32 accumulation — sequential NEON-vectorized B access replaces random scatter, 12.5% serial improvement
 apr07_0116	24	pending	50/50	0.5170 ms	0.1469 ms	keep	multi-axpy (4 A entries/iter) — 3 fewer acc load-stores per 16 cols, 4-way ILP, 34% serial + 30% parallel improvement
+apr07_0116	25	pending	50/50	0.4788 ms	0.1472 ms	keep	direct int32 output — eliminate int32→int64 widening pass + halve result bandwidth, 7% serial improvement

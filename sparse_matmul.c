@@ -113,104 +113,101 @@ static void multiply_single(
     }
 }
 
-/* Experiment 24: Dense B multi-axpy + int32 accumulation.
- * Process 4 A entries per inner loop iteration: load acc once,
- * accumulate 4 products from 4 B rows, store once.
- * Saves 3 load-store pairs per 16 columns vs single-axpy.
- * Auto-vectorized by clang → NEON smlal/smlal2 with 4-way ILP. */
+/* Dense B multi-axpy with direct int32 output.
+ * 4-way unrolling optimal. Output int32 directly — no widening pass.
+ * Results fit int32 (max |C[i,j]| ≈ 1000 across all test data). */
 static void multiply_dense_axpy(
     int rows_a, int cols_a, int cols_b,
-    const int *a_rowptr, const int16_t *a_colidx, const int8_t *a_vals,
-    const int8_t *b_dense,
-    long long *result
+    const int * restrict a_rowptr, const int16_t * restrict a_colidx,
+    const int8_t * restrict a_vals,
+    const int8_t * restrict b_dense,
+    int32_t * restrict result
 ) {
-    int32_t *acc = (int32_t *)malloc((long long)cols_b * sizeof(int32_t));
-
     for (int i = 0; i < rows_a; i++) {
-        memset(acc, 0, (long long)cols_b * sizeof(int32_t));
-
+        int32_t * restrict res = result + (long long)i * cols_b;
         int a_start = a_rowptr[i];
         int a_end = a_rowptr[i + 1];
+        if (a_start == a_end) {
+            memset(res, 0, (long long)cols_b * sizeof(int32_t));
+            continue;
+        }
+
+        memset(res, 0, (long long)cols_b * sizeof(int32_t));
         int p = a_start;
 
-        /* Process 4 A entries at once for better ILP */
         for (; p + 3 < a_end; p += 4) {
-            int32_t av0 = (int32_t)a_vals[p];
-            int32_t av1 = (int32_t)a_vals[p + 1];
-            int32_t av2 = (int32_t)a_vals[p + 2];
-            int32_t av3 = (int32_t)a_vals[p + 3];
-            const int8_t *br0 = b_dense + (long long)a_colidx[p] * cols_b;
-            const int8_t *br1 = b_dense + (long long)a_colidx[p + 1] * cols_b;
-            const int8_t *br2 = b_dense + (long long)a_colidx[p + 2] * cols_b;
-            const int8_t *br3 = b_dense + (long long)a_colidx[p + 3] * cols_b;
+            int32_t av0 = (int32_t)a_vals[p],   av1 = (int32_t)a_vals[p+1];
+            int32_t av2 = (int32_t)a_vals[p+2], av3 = (int32_t)a_vals[p+3];
+            const int8_t * restrict br0 = b_dense + (long long)a_colidx[p]   * cols_b;
+            const int8_t * restrict br1 = b_dense + (long long)a_colidx[p+1] * cols_b;
+            const int8_t * restrict br2 = b_dense + (long long)a_colidx[p+2] * cols_b;
+            const int8_t * restrict br3 = b_dense + (long long)a_colidx[p+3] * cols_b;
+            if (p + 7 < a_end) {
+                __builtin_prefetch(b_dense + (long long)a_colidx[p+4] * cols_b, 0, 1);
+                __builtin_prefetch(b_dense + (long long)a_colidx[p+5] * cols_b, 0, 1);
+                __builtin_prefetch(b_dense + (long long)a_colidx[p+6] * cols_b, 0, 1);
+                __builtin_prefetch(b_dense + (long long)a_colidx[p+7] * cols_b, 0, 1);
+            }
             for (int j = 0; j < cols_b; j++) {
-                acc[j] += av0 * (int32_t)br0[j] + av1 * (int32_t)br1[j]
-                        + av2 * (int32_t)br2[j] + av3 * (int32_t)br3[j];
+                res[j] += av0*(int32_t)br0[j] + av1*(int32_t)br1[j]
+                        + av2*(int32_t)br2[j] + av3*(int32_t)br3[j];
             }
         }
 
-        /* Remainder 1-3 A entries */
         for (; p < a_end; p++) {
             int32_t av = (int32_t)a_vals[p];
-            const int8_t *b_row = b_dense + (long long)a_colidx[p] * cols_b;
+            const int8_t * restrict b_row = b_dense + (long long)a_colidx[p] * cols_b;
             for (int j = 0; j < cols_b; j++) {
-                acc[j] += av * (int32_t)b_row[j];
+                res[j] += av * (int32_t)b_row[j];
             }
         }
-
-        long long *res = result + (long long)i * cols_b;
-        for (int j = 0; j < cols_b; j++) {
-            res[j] = (long long)acc[j];
-        }
     }
-    free(acc);
 }
 
-/* Dense multi-axpy row-range for parallel dispatch */
+/* Dense multi-axpy row-range for parallel dispatch — direct int32 output */
 static void multiply_dense_axpy_range(
     int row_start, int row_end, int cols_a, int cols_b,
-    const int *a_rowptr, const int16_t *a_colidx, const int8_t *a_vals,
-    const int8_t *b_dense,
-    long long *result
+    const int * restrict a_rowptr, const int16_t * restrict a_colidx,
+    const int8_t * restrict a_vals,
+    const int8_t * restrict b_dense,
+    int32_t * restrict result
 ) {
-    int32_t *acc = (int32_t *)malloc((long long)cols_b * sizeof(int32_t));
-
     for (int i = row_start; i < row_end; i++) {
-        memset(acc, 0, (long long)cols_b * sizeof(int32_t));
-
+        int32_t * restrict res = result + (long long)i * cols_b;
         int a_start = a_rowptr[i];
         int a_end = a_rowptr[i + 1];
+        memset(res, 0, (long long)cols_b * sizeof(int32_t));
+        if (a_start == a_end) continue;
+
         int p = a_start;
 
         for (; p + 3 < a_end; p += 4) {
-            int32_t av0 = (int32_t)a_vals[p];
-            int32_t av1 = (int32_t)a_vals[p + 1];
-            int32_t av2 = (int32_t)a_vals[p + 2];
-            int32_t av3 = (int32_t)a_vals[p + 3];
-            const int8_t *br0 = b_dense + (long long)a_colidx[p] * cols_b;
-            const int8_t *br1 = b_dense + (long long)a_colidx[p + 1] * cols_b;
-            const int8_t *br2 = b_dense + (long long)a_colidx[p + 2] * cols_b;
-            const int8_t *br3 = b_dense + (long long)a_colidx[p + 3] * cols_b;
+            int32_t av0 = (int32_t)a_vals[p],   av1 = (int32_t)a_vals[p+1];
+            int32_t av2 = (int32_t)a_vals[p+2], av3 = (int32_t)a_vals[p+3];
+            const int8_t * restrict br0 = b_dense + (long long)a_colidx[p]   * cols_b;
+            const int8_t * restrict br1 = b_dense + (long long)a_colidx[p+1] * cols_b;
+            const int8_t * restrict br2 = b_dense + (long long)a_colidx[p+2] * cols_b;
+            const int8_t * restrict br3 = b_dense + (long long)a_colidx[p+3] * cols_b;
+            if (p + 7 < a_end) {
+                __builtin_prefetch(b_dense + (long long)a_colidx[p+4] * cols_b, 0, 1);
+                __builtin_prefetch(b_dense + (long long)a_colidx[p+5] * cols_b, 0, 1);
+                __builtin_prefetch(b_dense + (long long)a_colidx[p+6] * cols_b, 0, 1);
+                __builtin_prefetch(b_dense + (long long)a_colidx[p+7] * cols_b, 0, 1);
+            }
             for (int j = 0; j < cols_b; j++) {
-                acc[j] += av0 * (int32_t)br0[j] + av1 * (int32_t)br1[j]
-                        + av2 * (int32_t)br2[j] + av3 * (int32_t)br3[j];
+                res[j] += av0*(int32_t)br0[j] + av1*(int32_t)br1[j]
+                        + av2*(int32_t)br2[j] + av3*(int32_t)br3[j];
             }
         }
 
         for (; p < a_end; p++) {
             int32_t av = (int32_t)a_vals[p];
-            const int8_t *b_row = b_dense + (long long)a_colidx[p] * cols_b;
+            const int8_t * restrict b_row = b_dense + (long long)a_colidx[p] * cols_b;
             for (int j = 0; j < cols_b; j++) {
-                acc[j] += av * (int32_t)b_row[j];
+                res[j] += av * (int32_t)b_row[j];
             }
         }
-
-        long long *res = result + (long long)i * cols_b;
-        for (int j = 0; j < cols_b; j++) {
-            res[j] = (long long)acc[j];
-        }
     }
-    free(acc);
 }
 
 /* Experiment 22: Row-reordered nomerge with B-data L1 locality.
@@ -1303,7 +1300,7 @@ void sparse_matmul_batch_dense_axpy(
     const int16_t **all_a_colidx,
     const int8_t **all_a_vals,
     const int8_t **all_b_i8,
-    long long **all_result,
+    int32_t **all_result,
     double *latencies_ns
 ) {
     mach_timebase_info_data_t tb;
@@ -1334,7 +1331,7 @@ void sparse_matmul_batch_dense_axpy_parallel(
     const int16_t **all_a_colidx,
     const int8_t **all_a_vals,
     const int8_t **all_b_i8,
-    long long **all_result,
+    int32_t **all_result,
     double *latencies_ns,
     int num_threads
 ) {
@@ -1352,7 +1349,7 @@ void sparse_matmul_batch_dense_axpy_parallel(
         const int16_t *a_colidx = all_a_colidx[t];
         const int8_t *a_vals = all_a_vals[t];
         const int8_t *b_dense = all_b_i8[t];
-        long long *result = all_result[t];
+        int32_t *result = all_result[t];
 
         if (rows_a < 100 || num_threads <= 1) {
             uint64_t start = mach_absolute_time();
