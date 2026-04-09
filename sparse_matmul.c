@@ -1351,23 +1351,18 @@ void sparse_matmul_batch_adaptive(
         int nnz_a = all_a_rowptr[t][rows_a];
         int use_blas = should_use_blas(rows_a, cols_a, cols_b, nnz_a);
 
+        const int *a_rowptr = all_a_rowptr[t];
+        const int16_t *a_colidx = all_a_colidx[t];
+        const int8_t *a_vals = all_a_vals[t];
+        const int8_t *b_dense = all_b_i8[t];
+        int32_t *result = all_result[t];
+
         uint64_t start = mach_absolute_time();
 
-        if (use_blas) {
-            multiply_dense_blas_i32(
-                rows_a, cols_a, cols_b,
-                all_a_f32[t], all_b_f32[t], all_c_f32[t], all_result[t]
-            );
-        } else if (rows_a >= 200) {
-            /* Large NEON case: use intra-case parallelism */
+        if (rows_a >= 200) {
+            /* Large case: use intra-case parallelism */
             int rows_per_task = 20;
             int num_tasks = (rows_a + rows_per_task - 1) / rows_per_task;
-
-            const int *a_rowptr = all_a_rowptr[t];
-            const int16_t *a_colidx = all_a_colidx[t];
-            const int8_t *a_vals = all_a_vals[t];
-            const int8_t *b_dense = all_b_i8[t];
-            int32_t *result = all_result[t];
 
             dispatch_apply(num_tasks, queue, ^(size_t tid) {
                 int rs = (int)tid * rows_per_task;
@@ -1382,9 +1377,8 @@ void sparse_matmul_batch_adaptive(
         } else {
             multiply_dense_axpy(
                 rows_a, cols_a, cols_b,
-                all_a_rowptr[t], all_a_colidx[t], all_a_vals[t],
-                all_b_i8[t], all_result[t]
-            );
+                a_rowptr, a_colidx, a_vals,
+                b_dense, result);
         }
 
         uint64_t end = mach_absolute_time();
