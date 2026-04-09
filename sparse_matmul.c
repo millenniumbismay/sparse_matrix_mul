@@ -113,18 +113,15 @@ static void multiply_single(
     }
 }
 
-/* Experiment 23: Dense B + int32 axpy accumulation.
- * Instead of sparse scatter (res[b_colidx[bj]] += av * b_vals[bj]),
- * use sequential axpy: acc[j] += av * B_dense[k*N + j] for all j.
- *
- * Analysis: dense does 7.2x more ops across all 50 test cases, but each
- * op is sequential → NEON auto-vectorizes to 16 int8 MACs/instruction.
- * Effective ratio = 7.2/16 = 0.45x → ~2.2x fewer effective ops.
- * Plus: zero cache misses on result array (sequential writes). */
+/* Experiment 24: Dense B multi-axpy + int32 accumulation.
+ * Process 4 A entries per inner loop iteration: load acc once,
+ * accumulate 4 products from 4 B rows, store once.
+ * Saves 3 load-store pairs per 16 columns vs single-axpy.
+ * Auto-vectorized by clang → NEON smlal/smlal2 with 4-way ILP. */
 static void multiply_dense_axpy(
     int rows_a, int cols_a, int cols_b,
     const int *a_rowptr, const int16_t *a_colidx, const int8_t *a_vals,
-    const int8_t *b_dense,   /* B stored as dense int8, row-major */
+    const int8_t *b_dense,
     long long *result
 ) {
     int32_t *acc = (int32_t *)malloc((long long)cols_b * sizeof(int32_t));
@@ -134,17 +131,33 @@ static void multiply_dense_axpy(
 
         int a_start = a_rowptr[i];
         int a_end = a_rowptr[i + 1];
-        for (int p = a_start; p < a_end; p++) {
+        int p = a_start;
+
+        /* Process 4 A entries at once for better ILP */
+        for (; p + 3 < a_end; p += 4) {
+            int32_t av0 = (int32_t)a_vals[p];
+            int32_t av1 = (int32_t)a_vals[p + 1];
+            int32_t av2 = (int32_t)a_vals[p + 2];
+            int32_t av3 = (int32_t)a_vals[p + 3];
+            const int8_t *br0 = b_dense + (long long)a_colidx[p] * cols_b;
+            const int8_t *br1 = b_dense + (long long)a_colidx[p + 1] * cols_b;
+            const int8_t *br2 = b_dense + (long long)a_colidx[p + 2] * cols_b;
+            const int8_t *br3 = b_dense + (long long)a_colidx[p + 3] * cols_b;
+            for (int j = 0; j < cols_b; j++) {
+                acc[j] += av0 * (int32_t)br0[j] + av1 * (int32_t)br1[j]
+                        + av2 * (int32_t)br2[j] + av3 * (int32_t)br3[j];
+            }
+        }
+
+        /* Remainder 1-3 A entries */
+        for (; p < a_end; p++) {
             int32_t av = (int32_t)a_vals[p];
-            int k = a_colidx[p];
-            const int8_t *b_row = b_dense + (long long)k * cols_b;
-            /* Sequential axpy — auto-vectorized by clang to NEON */
+            const int8_t *b_row = b_dense + (long long)a_colidx[p] * cols_b;
             for (int j = 0; j < cols_b; j++) {
                 acc[j] += av * (int32_t)b_row[j];
             }
         }
 
-        /* Widen int32 → int64 (sequential, NEON auto-vectorizable) */
         long long *res = result + (long long)i * cols_b;
         for (int j = 0; j < cols_b; j++) {
             res[j] = (long long)acc[j];
@@ -153,7 +166,7 @@ static void multiply_dense_axpy(
     free(acc);
 }
 
-/* Dense axpy row-range for parallel dispatch */
+/* Dense multi-axpy row-range for parallel dispatch */
 static void multiply_dense_axpy_range(
     int row_start, int row_end, int cols_a, int cols_b,
     const int *a_rowptr, const int16_t *a_colidx, const int8_t *a_vals,
@@ -167,10 +180,26 @@ static void multiply_dense_axpy_range(
 
         int a_start = a_rowptr[i];
         int a_end = a_rowptr[i + 1];
-        for (int p = a_start; p < a_end; p++) {
+        int p = a_start;
+
+        for (; p + 3 < a_end; p += 4) {
+            int32_t av0 = (int32_t)a_vals[p];
+            int32_t av1 = (int32_t)a_vals[p + 1];
+            int32_t av2 = (int32_t)a_vals[p + 2];
+            int32_t av3 = (int32_t)a_vals[p + 3];
+            const int8_t *br0 = b_dense + (long long)a_colidx[p] * cols_b;
+            const int8_t *br1 = b_dense + (long long)a_colidx[p + 1] * cols_b;
+            const int8_t *br2 = b_dense + (long long)a_colidx[p + 2] * cols_b;
+            const int8_t *br3 = b_dense + (long long)a_colidx[p + 3] * cols_b;
+            for (int j = 0; j < cols_b; j++) {
+                acc[j] += av0 * (int32_t)br0[j] + av1 * (int32_t)br1[j]
+                        + av2 * (int32_t)br2[j] + av3 * (int32_t)br3[j];
+            }
+        }
+
+        for (; p < a_end; p++) {
             int32_t av = (int32_t)a_vals[p];
-            int k = a_colidx[p];
-            const int8_t *b_row = b_dense + (long long)k * cols_b;
+            const int8_t *b_row = b_dense + (long long)a_colidx[p] * cols_b;
             for (int j = 0; j < cols_b; j++) {
                 acc[j] += av * (int32_t)b_row[j];
             }
