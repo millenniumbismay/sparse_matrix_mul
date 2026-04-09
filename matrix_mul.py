@@ -723,7 +723,7 @@ def main():
 
     # Always run both serial (core algorithm) and parallel
     serial_mean, serial_std, serial_latencies = run_experiment(cases, method="adaptive")
-    parallel_mean, parallel_std, parallel_latencies = run_experiment(cases, method="adaptive_parallel")
+    parallel_mean, parallel_std, parallel_latencies = run_experiment(cases, method="dense_axpy_parallel")
 
     # Use serial run for correctness checking (int32 result vs int32 expected)
     for i, tc in enumerate(cases):
