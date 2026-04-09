@@ -1206,25 +1206,36 @@ static void multiply_dense_blas_i32(
     int rows_a, int cols_a, int cols_b,
     const float *a_f32,
     const float *b_f32,
-    float *c_f32,
+    float *c_f32,  /* unused when doing in-place conversion */
     int32_t *result
 ) {
     long long c_size = (long long)rows_a * cols_b;
 
+    /* Write sgemm output directly to result buffer (float and int32 are same size).
+     * Then convert in-place from float to int32. */
     cblas_sgemm(CblasRowMajor, CblasNoTrans, CblasNoTrans,
                 rows_a, cols_b, cols_a,
                 1.0f, a_f32, cols_a, b_f32, cols_b,
-                0.0f, c_f32, cols_b);
+                0.0f, (float *)result, cols_b);
 
-    /* Convert float32 → int32 with NEON round-to-nearest */
+    /* In-place convert float32 → int32 with NEON round-to-nearest */
+    float *fp = (float *)result;
     long long i = 0;
+    for (; i + 15 < c_size; i += 16) {
+        float32x4_t f0 = vld1q_f32(fp + i);
+        float32x4_t f1 = vld1q_f32(fp + i + 4);
+        float32x4_t f2 = vld1q_f32(fp + i + 8);
+        float32x4_t f3 = vld1q_f32(fp + i + 12);
+        vst1q_s32(result + i,      vcvtnq_s32_f32(f0));
+        vst1q_s32(result + i + 4,  vcvtnq_s32_f32(f1));
+        vst1q_s32(result + i + 8,  vcvtnq_s32_f32(f2));
+        vst1q_s32(result + i + 12, vcvtnq_s32_f32(f3));
+    }
     for (; i + 3 < c_size; i += 4) {
-        float32x4_t fv = vld1q_f32(c_f32 + i);
-        int32x4_t iv = vcvtnq_s32_f32(fv);
-        vst1q_s32(result + i, iv);
+        vst1q_s32(result + i, vcvtnq_s32_f32(vld1q_f32(fp + i)));
     }
     for (; i < c_size; i++)
-        result[i] = (int32_t)lroundf(c_f32[i]);
+        result[i] = (int32_t)lroundf(fp[i]);
 }
 
 /* Batch BLAS multiply — serial */
