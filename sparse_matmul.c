@@ -1286,11 +1286,28 @@ void sparse_matmul_batch_blas_parallel(
     }
 }
 
-/* Adaptive hybrid: BLAS for large, sparse NEON for small/sparse.
- * BLAS (sgemm) uses AMX hardware and is faster for large dense matrices.
- * Sparse NEON is faster for small matrices due to lower overhead.
- * Threshold: rows_a * cols_a > 200000 → BLAS path. */
-#define BLAS_THRESHOLD 30000
+/* Adaptive hybrid: route based on estimated work ratio.
+ * BLAS cost ∝ rows_a * cols_a * cols_b (dense compute)
+ * Sparse cost ∝ nnz(A) * cols_b (only nonzero entries)
+ * Use BLAS when dense compute is cheaper per unit of AMX throughput.
+ *
+ * Empirically: BLAS wins when nnz(A)/cols_b > threshold (large dense output)
+ * or when matrix is large enough for AMX to amortize setup.
+ * Simple heuristic: use sparse work estimate vs BLAS work. */
+#define BLAS_MIN_SIZE 30000  /* minimum rows*cols for BLAS to be worthwhile */
+
+static inline int should_use_blas(int rows_a, int cols_a, int cols_b, int nnz_a) {
+    long long mat_size = (long long)rows_a * cols_a;
+    if (mat_size < BLAS_MIN_SIZE) return 0;
+
+    /* Sparse work = nnz_a * cols_b (per-tile overhead adds ~30%)
+     * BLAS work = rows_a * cols_a * cols_b but AMX is ~10x faster per op
+     * Route to BLAS if: blas_work/10 < sparse_work*1.3
+     * i.e. if density > ~13% × (AMX_advantage/sparse_overhead) */
+    long long sparse_work = (long long)nnz_a * cols_b;
+    long long blas_work = (long long)rows_a * cols_a * cols_b;
+    return blas_work < sparse_work * 8;
+}
 
 void sparse_matmul_batch_adaptive(
     int num_cases,
@@ -1315,11 +1332,13 @@ void sparse_matmul_batch_adaptive(
     double ns_per_tick = (double)tb.numer / (double)tb.denom;
 
     for (int t = 0; t < num_cases; t++) {
-        long long mat_size = (long long)all_rows_a[t] * all_cols_a[t];
+        int nnz_a = all_a_rowptr[t][all_rows_a[t]];
+        int use_blas = should_use_blas(
+            all_rows_a[t], all_cols_a[t], all_cols_b[t], nnz_a);
 
         uint64_t start = mach_absolute_time();
 
-        if (mat_size > BLAS_THRESHOLD) {
+        if (use_blas) {
             multiply_dense_blas_i32(
                 all_rows_a[t], all_cols_a[t], all_cols_b[t],
                 all_a_f32[t], all_b_f32[t], all_c_f32[t], all_result[t]
@@ -1363,9 +1382,11 @@ void sparse_matmul_batch_adaptive_parallel(
     dispatch_queue_t queue = dispatch_get_global_queue(QOS_CLASS_USER_INTERACTIVE, 0);
 
     for (int t = 0; t < num_cases; t++) {
-        long long mat_size = (long long)all_rows_a[t] * all_cols_a[t];
+        int nnz_a = all_a_rowptr[t][all_rows_a[t]];
+        int use_blas = should_use_blas(
+            all_rows_a[t], all_cols_a[t], all_cols_b[t], nnz_a);
 
-        if (mat_size > BLAS_THRESHOLD) {
+        if (use_blas) {
             /* BLAS already threads internally */
             uint64_t start = mach_absolute_time();
             multiply_dense_blas_i32(
