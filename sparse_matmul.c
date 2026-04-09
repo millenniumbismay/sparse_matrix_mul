@@ -1434,6 +1434,50 @@ void sparse_matmul_batch_adaptive_parallel(
     }
 }
 
+/* Batch-parallel adaptive: run all test cases concurrently via GCD,
+ * each using the best algorithm for its size/sparsity. */
+void sparse_matmul_batch_adaptive_batch_parallel(
+    int num_cases,
+    const int *all_rows_a,
+    const int *all_cols_a,
+    const int *all_cols_b,
+    const int **all_a_rowptr,
+    const int16_t **all_a_colidx,
+    const int8_t **all_a_vals,
+    const int8_t **all_b_i8,
+    const float **all_a_f32,
+    const float **all_b_f32,
+    float **all_c_f32,
+    int32_t **all_result,
+    double *latencies_ns,
+    int num_threads
+) {
+    mach_timebase_info_data_t tb;
+    mach_timebase_info(&tb);
+    double ns_per_tick = (double)tb.numer / (double)tb.denom;
+
+    dispatch_queue_t queue = dispatch_get_global_queue(QOS_CLASS_USER_INTERACTIVE, 0);
+
+    dispatch_apply(num_cases, queue, ^(size_t t) {
+        int nnz_a = all_a_rowptr[t][all_rows_a[t]];
+        int rows_a = all_rows_a[t];
+        int cols_a = all_cols_a[t];
+        int cols_b = all_cols_b[t];
+
+        uint64_t start = mach_absolute_time();
+
+        /* For batch-parallel, always use sparse NEON (avoids BLAS thread contention) */
+        multiply_dense_axpy(
+            rows_a, cols_a, cols_b,
+            all_a_rowptr[t], all_a_colidx[t], all_a_vals[t],
+            all_b_i8[t], all_result[t]
+        );
+
+        uint64_t end = mach_absolute_time();
+        latencies_ns[t] = (double)(end - start) * ns_per_tick;
+    });
+}
+
 /* Batch multiply — serial version with C-side timing */
 void sparse_matmul_batch(
     int num_cases,
