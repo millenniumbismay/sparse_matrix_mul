@@ -123,6 +123,32 @@ _lib.sparse_matmul_batch_blas_parallel.argtypes = [
     ctypes.c_int,
 ]
 
+_lib.sparse_matmul_batch_adaptive.restype = None
+_lib.sparse_matmul_batch_adaptive.argtypes = [
+    ctypes.c_int,
+    ctypes.c_void_p, ctypes.c_void_p, ctypes.c_void_p,
+    # sparse args
+    ctypes.c_void_p, ctypes.c_void_p, ctypes.c_void_p,
+    ctypes.c_void_p,  # b_i8
+    # blas args
+    ctypes.c_void_p, ctypes.c_void_p, ctypes.c_void_p,
+    # output
+    ctypes.c_void_p,
+    ctypes.c_void_p,
+]
+
+_lib.sparse_matmul_batch_adaptive_parallel.restype = None
+_lib.sparse_matmul_batch_adaptive_parallel.argtypes = [
+    ctypes.c_int,
+    ctypes.c_void_p, ctypes.c_void_p, ctypes.c_void_p,
+    ctypes.c_void_p, ctypes.c_void_p, ctypes.c_void_p,
+    ctypes.c_void_p,
+    ctypes.c_void_p, ctypes.c_void_p, ctypes.c_void_p,
+    ctypes.c_void_p,
+    ctypes.c_void_p,
+    ctypes.c_int,
+]
+
 _lib.build_row_order.restype = None
 _lib.build_row_order.argtypes = [
     ctypes.c_int,
@@ -324,7 +350,7 @@ def run_batch(cases, method="serial"):
     all_b_rowptr = PtrArray(*(tc["b_rowptr"].buffer_info()[0] for tc in cases))
     all_b_colidx = PtrArray(*(ctypes.cast(tc["b_colidx"].buffer_info()[0], ctypes.c_void_p).value for tc in cases))
     all_b_vals = PtrArray(*(ctypes.addressof(tc["b_vals"]) for tc in cases))
-    use_i32 = method in ("dense_axpy", "dense_axpy_parallel", "blas", "blas_parallel")
+    use_i32 = method in ("dense_axpy", "dense_axpy_parallel", "blas", "blas_parallel", "adaptive", "adaptive_parallel")
     all_result = PtrArray(*(tc["result_buf_i32" if use_i32 else "result_buf"].buffer_info()[0] for tc in cases))
 
     latencies_ns = (ctypes.c_double * n)()
@@ -506,6 +532,55 @@ def run_batch(cases, method="serial"):
             ctypes.addressof(all_result),
             ctypes.addressof(latencies_ns),
         )
+    elif method == "adaptive":
+        all_a_rowptr = PtrArray(*(tc["a_rowptr"].buffer_info()[0] for tc in cases))
+        all_a_colidx = PtrArray(*(ctypes.cast(tc["a_colidx"].buffer_info()[0], ctypes.c_void_p).value for tc in cases))
+        all_a_vals = PtrArray(*(ctypes.addressof(tc["a_vals"]) for tc in cases))
+        all_b_i8 = PtrArray(*(ctypes.addressof(tc["b_i8"]) for tc in cases))
+        all_a_f32 = PtrArray(*(ctypes.addressof(tc["a_f32"]) for tc in cases))
+        all_b_f32 = PtrArray(*(ctypes.addressof(tc["b_f32"]) for tc in cases))
+        all_c_f32 = PtrArray(*(ctypes.addressof(tc["c_f32"]) for tc in cases))
+
+        _lib.sparse_matmul_batch_adaptive(
+            n,
+            ctypes.addressof(all_rows_a),
+            ctypes.addressof(all_cols_a),
+            ctypes.addressof(all_cols_b),
+            ctypes.addressof(all_a_rowptr),
+            ctypes.addressof(all_a_colidx),
+            ctypes.addressof(all_a_vals),
+            ctypes.addressof(all_b_i8),
+            ctypes.addressof(all_a_f32),
+            ctypes.addressof(all_b_f32),
+            ctypes.addressof(all_c_f32),
+            ctypes.addressof(all_result),
+            ctypes.addressof(latencies_ns),
+        )
+    elif method == "adaptive_parallel":
+        all_a_rowptr = PtrArray(*(tc["a_rowptr"].buffer_info()[0] for tc in cases))
+        all_a_colidx = PtrArray(*(ctypes.cast(tc["a_colidx"].buffer_info()[0], ctypes.c_void_p).value for tc in cases))
+        all_a_vals = PtrArray(*(ctypes.addressof(tc["a_vals"]) for tc in cases))
+        all_b_i8 = PtrArray(*(ctypes.addressof(tc["b_i8"]) for tc in cases))
+        all_a_f32 = PtrArray(*(ctypes.addressof(tc["a_f32"]) for tc in cases))
+        all_b_f32 = PtrArray(*(ctypes.addressof(tc["b_f32"]) for tc in cases))
+        all_c_f32 = PtrArray(*(ctypes.addressof(tc["c_f32"]) for tc in cases))
+
+        _lib.sparse_matmul_batch_adaptive_parallel(
+            n,
+            ctypes.addressof(all_rows_a),
+            ctypes.addressof(all_cols_a),
+            ctypes.addressof(all_cols_b),
+            ctypes.addressof(all_a_rowptr),
+            ctypes.addressof(all_a_colidx),
+            ctypes.addressof(all_a_vals),
+            ctypes.addressof(all_b_i8),
+            ctypes.addressof(all_a_f32),
+            ctypes.addressof(all_b_f32),
+            ctypes.addressof(all_c_f32),
+            ctypes.addressof(all_result),
+            ctypes.addressof(latencies_ns),
+            6,
+        )
     elif method == "dense_axpy":
         all_a_rowptr = PtrArray(*(tc["a_rowptr"].buffer_info()[0] for tc in cases))
         all_a_colidx = PtrArray(*(ctypes.cast(tc["a_colidx"].buffer_info()[0], ctypes.c_void_p).value for tc in cases))
@@ -647,8 +722,8 @@ def main():
     cases = load_test_cases()
 
     # Always run both serial (core algorithm) and parallel
-    serial_mean, serial_std, serial_latencies = run_experiment(cases, method="blas")
-    parallel_mean, parallel_std, parallel_latencies = run_experiment(cases, method="blas_parallel")
+    serial_mean, serial_std, serial_latencies = run_experiment(cases, method="adaptive")
+    parallel_mean, parallel_std, parallel_latencies = run_experiment(cases, method="adaptive_parallel")
 
     # Use serial run for correctness checking (int32 result vs int32 expected)
     for i, tc in enumerate(cases):

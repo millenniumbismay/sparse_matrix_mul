@@ -1286,6 +1286,133 @@ void sparse_matmul_batch_blas_parallel(
     }
 }
 
+/* Adaptive hybrid: BLAS for large, sparse NEON for small/sparse.
+ * BLAS (sgemm) uses AMX hardware and is faster for large dense matrices.
+ * Sparse NEON is faster for small matrices due to lower overhead.
+ * Threshold: rows_a * cols_a > 200000 → BLAS path. */
+#define BLAS_THRESHOLD 30000
+
+void sparse_matmul_batch_adaptive(
+    int num_cases,
+    const int *all_rows_a,
+    const int *all_cols_a,
+    const int *all_cols_b,
+    /* Sparse args */
+    const int **all_a_rowptr,
+    const int16_t **all_a_colidx,
+    const int8_t **all_a_vals,
+    const int8_t **all_b_i8,
+    /* BLAS args */
+    const float **all_a_f32,
+    const float **all_b_f32,
+    float **all_c_f32,
+    /* Output */
+    int32_t **all_result,
+    double *latencies_ns
+) {
+    mach_timebase_info_data_t tb;
+    mach_timebase_info(&tb);
+    double ns_per_tick = (double)tb.numer / (double)tb.denom;
+
+    for (int t = 0; t < num_cases; t++) {
+        long long mat_size = (long long)all_rows_a[t] * all_cols_a[t];
+
+        uint64_t start = mach_absolute_time();
+
+        if (mat_size > BLAS_THRESHOLD) {
+            multiply_dense_blas_i32(
+                all_rows_a[t], all_cols_a[t], all_cols_b[t],
+                all_a_f32[t], all_b_f32[t], all_c_f32[t], all_result[t]
+            );
+        } else {
+            multiply_dense_axpy(
+                all_rows_a[t], all_cols_a[t], all_cols_b[t],
+                all_a_rowptr[t], all_a_colidx[t], all_a_vals[t],
+                all_b_i8[t], all_result[t]
+            );
+        }
+
+        uint64_t end = mach_absolute_time();
+        latencies_ns[t] = (double)(end - start) * ns_per_tick;
+    }
+}
+
+void sparse_matmul_batch_adaptive_parallel(
+    int num_cases,
+    const int *all_rows_a,
+    const int *all_cols_a,
+    const int *all_cols_b,
+    /* Sparse args */
+    const int **all_a_rowptr,
+    const int16_t **all_a_colidx,
+    const int8_t **all_a_vals,
+    const int8_t **all_b_i8,
+    /* BLAS args */
+    const float **all_a_f32,
+    const float **all_b_f32,
+    float **all_c_f32,
+    /* Output */
+    int32_t **all_result,
+    double *latencies_ns,
+    int num_threads
+) {
+    mach_timebase_info_data_t tb;
+    mach_timebase_info(&tb);
+    double ns_per_tick = (double)tb.numer / (double)tb.denom;
+
+    dispatch_queue_t queue = dispatch_get_global_queue(QOS_CLASS_USER_INTERACTIVE, 0);
+
+    for (int t = 0; t < num_cases; t++) {
+        long long mat_size = (long long)all_rows_a[t] * all_cols_a[t];
+
+        if (mat_size > BLAS_THRESHOLD) {
+            /* BLAS already threads internally */
+            uint64_t start = mach_absolute_time();
+            multiply_dense_blas_i32(
+                all_rows_a[t], all_cols_a[t], all_cols_b[t],
+                all_a_f32[t], all_b_f32[t], all_c_f32[t], all_result[t]
+            );
+            uint64_t end = mach_absolute_time();
+            latencies_ns[t] = (double)(end - start) * ns_per_tick;
+        } else {
+            int rows_a = all_rows_a[t];
+            int cols_a = all_cols_a[t];
+            int cols_b = all_cols_b[t];
+            const int *a_rowptr = all_a_rowptr[t];
+            const int16_t *a_colidx = all_a_colidx[t];
+            const int8_t *a_vals = all_a_vals[t];
+            const int8_t *b_dense = all_b_i8[t];
+            int32_t *result = all_result[t];
+
+            if (rows_a < 100) {
+                uint64_t start = mach_absolute_time();
+                multiply_dense_axpy(rows_a, cols_a, cols_b,
+                                  a_rowptr, a_colidx, a_vals, b_dense, result);
+                uint64_t end = mach_absolute_time();
+                latencies_ns[t] = (double)(end - start) * ns_per_tick;
+            } else {
+                int rows_per_task = 20;
+                int num_tasks = (rows_a + rows_per_task - 1) / rows_per_task;
+                if (num_tasks < num_threads) num_tasks = num_threads;
+
+                uint64_t start = mach_absolute_time();
+                dispatch_apply(num_tasks, queue, ^(size_t tid) {
+                    int rs = (int)tid * rows_per_task;
+                    int re = rs + rows_per_task;
+                    if (re > rows_a) re = rows_a;
+                    if (rs < re) {
+                        multiply_dense_axpy_range(rs, re, cols_a, cols_b,
+                                                a_rowptr, a_colidx, a_vals,
+                                                b_dense, result);
+                    }
+                });
+                uint64_t end = mach_absolute_time();
+                latencies_ns[t] = (double)(end - start) * ns_per_tick;
+            }
+        }
+    }
+}
+
 /* Batch multiply — serial version with C-side timing */
 void sparse_matmul_batch(
     int num_cases,
