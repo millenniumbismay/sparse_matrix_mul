@@ -243,7 +243,7 @@ static void multiply_dense_axpy(
         memset(res, 0, (long long)cols_b * sizeof(int32_t));
         if (a_start == a_end) continue;
 
-        /* Process columns in tiles of TILE_W with register-resident accumulator */
+        /* Process columns in tiles with register-resident accumulator */
         int j;
         for (j = 0; j + TILE_W <= cols_b; j += TILE_W) {
             process_tile_neon(j, j + TILE_W, a_start, a_end,
