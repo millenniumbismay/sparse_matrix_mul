@@ -1331,21 +1331,46 @@ void sparse_matmul_batch_adaptive(
     mach_timebase_info(&tb);
     double ns_per_tick = (double)tb.numer / (double)tb.denom;
 
+    dispatch_queue_t queue = dispatch_get_global_queue(QOS_CLASS_USER_INTERACTIVE, 0);
+
     for (int t = 0; t < num_cases; t++) {
-        int nnz_a = all_a_rowptr[t][all_rows_a[t]];
-        int use_blas = should_use_blas(
-            all_rows_a[t], all_cols_a[t], all_cols_b[t], nnz_a);
+        int rows_a = all_rows_a[t];
+        int cols_a = all_cols_a[t];
+        int cols_b = all_cols_b[t];
+        int nnz_a = all_a_rowptr[t][rows_a];
+        int use_blas = should_use_blas(rows_a, cols_a, cols_b, nnz_a);
 
         uint64_t start = mach_absolute_time();
 
         if (use_blas) {
             multiply_dense_blas_i32(
-                all_rows_a[t], all_cols_a[t], all_cols_b[t],
+                rows_a, cols_a, cols_b,
                 all_a_f32[t], all_b_f32[t], all_c_f32[t], all_result[t]
             );
+        } else if (rows_a >= 200) {
+            /* Large NEON case: use intra-case parallelism */
+            int rows_per_task = 20;
+            int num_tasks = (rows_a + rows_per_task - 1) / rows_per_task;
+
+            const int *a_rowptr = all_a_rowptr[t];
+            const int16_t *a_colidx = all_a_colidx[t];
+            const int8_t *a_vals = all_a_vals[t];
+            const int8_t *b_dense = all_b_i8[t];
+            int32_t *result = all_result[t];
+
+            dispatch_apply(num_tasks, queue, ^(size_t tid) {
+                int rs = (int)tid * rows_per_task;
+                int re = rs + rows_per_task;
+                if (re > rows_a) re = rows_a;
+                if (rs < re) {
+                    multiply_dense_axpy_range(rs, re, cols_a, cols_b,
+                                            a_rowptr, a_colidx, a_vals,
+                                            b_dense, result);
+                }
+            });
         } else {
             multiply_dense_axpy(
-                all_rows_a[t], all_cols_a[t], all_cols_b[t],
+                rows_a, cols_a, cols_b,
                 all_a_rowptr[t], all_a_colidx[t], all_a_vals[t],
                 all_b_i8[t], all_result[t]
             );
