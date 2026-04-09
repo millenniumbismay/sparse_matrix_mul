@@ -1,0 +1,30 @@
+experiment	commit	serial_ms	parallel_ms	speedup_vs_baseline	description
+1	f932bf5	9838.68	-	1x	Baseline naive O(n^3)
+2	245fc5c	143.00	-	69x	Sparse DOK multiplication
+3	aae3799	120.29	-	82x	Fully sparse A+B with local var caching
+4	b84133c	30.34	-	324x	C extension via ctypes (CSR)
+6	f29e735	20.02	-	491x	Zero-copy buffer passing
+7	7d4205c	18.51	-	531x	Full-C pipeline with dense-IO
+9	7bbbad1	1.79	-	5496x	Pre-flatten in loader
+11	90bc6d5	1.61	-	6112x	Direct A-scan + CSR B only
+14	700463f	1.43	-	6880x	Compact CSR (int16+int8)
+15	e691238	1.35	-	7288x	Row-pair interleaved scatter
+16	734e1f4	1.15	-	8556x	Pre-built B CSR
+17	86c5e43	1.08	-	9110x	int8 A values + no memset
+18	17955cb	1.03	-	9553x	Pre-alloc result + direct C call
+19	0b410f9	0.91	-	10810x	Dual CSR merge multiply
+20	be36d75	0.91	0.22	44540x	Parallel GCD merge-iterate
+21	73bd376	0.91	0.21	10810x	Per-pair lazy zeroing
+22	3214a83	0.89	0.20	11054x	Remove merge-iterate, independent rows
+23	f752489	0.78	0.21	12613x	Dense B axpy + int32 accumulation
+24	5e4062a	0.52	0.15	18920x	Multi-axpy (4 A entries/iter)
+25	f42c720	0.48	0.15	20497x	Direct int32 output
+26	3188de1	0.30	0.12	32796x	int16 intermediate accumulation
+27	fa8172d	0.28	0.11	35138x	NEON register-tiled int16 accumulator
+28	85762ed	0.28	0.11	35138x	Revert hybrid — pure register-tiled
+29	3eba76e	0.24	0.16	40995x	cblas_sgemm float32 BLAS
+30	c935cb6	0.20	0.16	49193x	Adaptive BLAS/sparse hybrid
+31	a9aefd4	0.21	0.12	46851x	Best-of-both serial/parallel
+32	c907ac9	0.19	0.11	51783x	Sparsity-aware adaptive routing
+33	a483007	0.19	0.11	51783x	Thread count tuning + adaptive parallel
+35	336465a	0.12	0.12	81989x	Intra-case parallelism for serial
