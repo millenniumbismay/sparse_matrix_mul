@@ -1359,7 +1359,7 @@ void sparse_matmul_batch_adaptive(
 
         uint64_t start = mach_absolute_time();
 
-        if (rows_a >= 200) {
+        if (rows_a >= 100) {
             /* Large case: use intra-case parallelism */
             int rows_per_task = 20;
             int num_tasks = (rows_a + rows_per_task - 1) / rows_per_task;
