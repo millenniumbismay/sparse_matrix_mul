@@ -28,3 +28,6 @@ experiment	commit	serial_ms	parallel_ms	speedup_vs_baseline	description
 32	c907ac9	0.19	0.11	51783x	Sparsity-aware adaptive routing
 33	a483007	0.19	0.11	51783x	Thread count tuning + adaptive parallel
 35	336465a	0.12	0.12	81989x	Intra-case parallelism for serial
+37	64ef9aa	0.12	0.12	81989x	In-place BLAS f32→i32 conversion
+38	25b6571	0.11	0.11	89443x	Pure NEON parallel — eliminate BLAS
+39	12b3f2d	0.11	0.11	89443x	Lower parallelism threshold to 100

@@ -397,3 +397,40 @@
 - **Observation**: 37% serial improvement by parallelizing large cases. Serial and parallel now converge at ~0.12ms. This is ~82,000x vs the original baseline.
 
 ---
+
+### Experiment 36 — Work-Balanced Parallel Partitioning (Negative)
+
+- **Tag**: Not committed (reverted)
+- **Algorithm**: Instead of fixed rows_per_task=20, partition rows so each GCD task has roughly equal total nnz.
+- **Result**: 10% slower due to malloc overhead and partition scan computation.
+- **Observation**: Fixed-size partitioning is better — the nnz variance isn't large enough to cause significant load imbalance, and malloc cost exceeds any balance gain.
+
+---
+
+### Experiment 37 — In-Place BLAS f32→i32 Conversion
+
+- **Tag**: apr07_0116 — Experiment 37 — 64ef9aa
+- **Algorithm**: Write sgemm output directly to int32 result buffer (same 4-byte element size), convert in-place. Eliminates separate c_f32 read pass.
+- **Result**: 50/50 passed, serial 0.12ms, parallel 0.12ms (marginal improvement)
+- **Also tested**: rows_per_task 10/30/40/50 (20 is optimal), 16-wide unrolled conversion (marginal)
+
+---
+
+### Experiment 38 — Pure NEON Parallel (Eliminate BLAS Path)
+
+- **Tag**: apr07_0116 — Experiment 38 — 25b6571
+- **Algorithm**: Removed BLAS routing entirely from serial adaptive batch. All cases now use NEON register-tiled kernel with GCD parallelism for rows >= 200, serial NEON for small cases. Eliminates float32 conversion overhead.
+- **Result**: 50/50 passed, serial 0.11ms, parallel 0.11ms
+- **Observation**: BLAS conversion overhead (sgemm + f32→i32) was a net loss when NEON + GCD parallelism is available. Pure NEON is ~8% faster. ~89,000x vs baseline.
+
+---
+
+### Experiment 39 — Lower Parallelism Threshold
+
+- **Tag**: apr07_0116 — Experiment 39 — 12b3f2d
+- **Algorithm**: Lowered GCD dispatch threshold from rows_a >= 200 to >= 100.
+- **Tested**: 50 (~0.115ms), 100 (~0.116ms), 150 (~0.119ms), 200 (~0.12ms), 6 (~0.110ms high variance)
+- **Result**: 50/50 passed, serial 0.11ms, parallel 0.11ms
+- **Observation**: 100 is a stable sweet spot. Marginal improvement from parallelizing medium cases.
+
+---
